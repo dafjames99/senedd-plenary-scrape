@@ -12,3 +12,14 @@ dependencies = [
     "requests>=2.34.2",
     "sqlalchemy>=2.0.50",
 ]
+
+[project.optional-dependencies]
+openai = [
+    "openai>=2.40.0",
+]
+sentence-transformer = [
+    "sentence-transformers>=5.5.1",
+]
+ollama = [
+    "ollama>=0.6.2",
+]
