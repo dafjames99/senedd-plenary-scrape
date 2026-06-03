@@ -8,7 +8,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.db_schema import (
-    Base, Meeting, Member, RawContribution, CleanContribution, 
+    Base, Meeting, Member, MemberJobTitle, RawContribution, CleanContribution, 
     ClassifiedContribution, Speech, SpeechPart, ProceduralEvent, 
     RowTypeEnum
 )
@@ -230,13 +230,14 @@ class SeneddPipeline:
                     'speech_language': raw.contribution_language,
                     'speech_parts': [],
                     'texts': [],
-                    'start_time': raw.contribution_time,
-                    'end_time': raw.contribution_time,
                 }
             
             # Add to current speech
             if clean.contribution_verbatim_clean:
-                current_speech['texts'].append(clean.contribution_verbatim_clean)
+                if clean.contribution_translated_clean:
+                    current_speech['texts'].append(clean.contribution_translated_clean)
+                else:
+                    current_speech['texts'].append(clean.contribution_verbatim_clean)
             
             current_speech['speech_parts'].append({
                 'contribution_id': raw.contribution_id,
@@ -244,12 +245,9 @@ class SeneddPipeline:
                 'contribution_time': raw.contribution_time,
                 'spoken_url': raw.contribution_spoken_seneddtv,
                 'translated_url': raw.contribution_translated_seneddtv,
-                'verbatim_text': clean.contribution_verbatim_clean,
+                'verbatim_text': clean.contribution_translated_text or clean.contribution_verbatim_clean,
             })
             
-            if raw.contribution_time:
-                current_speech['end_time'] = raw.contribution_time
-        
         # Don't forget last speech
         if current_speech is not None:
             speeches.append(current_speech)
@@ -264,8 +262,6 @@ class SeneddPipeline:
                 speaker_name=speech_dict['speaker_name'],
                 speech_language=speech_dict['speech_language'],
                 speech_text=' '.join(speech_dict['texts']),
-                start_time=speech_dict['start_time'],
-                end_time=speech_dict['end_time'],
                 source_row_count=len(speech_dict['speech_parts']),
             )
             session.add(speech)
@@ -289,30 +285,71 @@ class SeneddPipeline:
         session.close()
         print(f"✓ Reconstructed {count} speeches from grouped contributions")
         return count
-    
     def build_members_dimension(self):
         """
         Phase 5a: Build/complete members dimension table.
         """
         print("\nPhase 5a: Building members dimension")
+
         session = self.SessionLocal()
-        
-        # Members are already created during ingest, just ensure all fields populated
+
         raw_rows = session.query(RawContribution).filter(
             RawContribution.member_id.isnot(None)
         ).all()
-        
+
         for raw in raw_rows:
-            member = session.query(Member).filter_by(member_id=raw.member_id).first()
-            if member and not member.biography_english:
-                member.biography_english = raw.member_biog_english
-                member.biography_welsh = raw.member_biog_welsh
-                member.job_title_welsh = raw.member_job_title_welsh
-        
+
+            # --------------------
+            # Populate member info
+            # --------------------
+            member = (
+                session.query(Member)
+                .filter_by(member_id=raw.member_id)
+                .first()
+            )
+
+            if member:
+
+                if not member.biography_english:
+                    member.biography_english = raw.member_biog_english
+
+                if not member.biography_welsh:
+                    member.biography_welsh = raw.member_biog_welsh
+
+                if not member.sort_code:
+                    member.sort_code = raw.member_sort_code
+
+            # --------------------
+            # Populate meeting role
+            # --------------------
+            existing_title = (
+                session.query(MemberJobTitle)
+                .filter_by(
+                    member_id=raw.member_id,
+                    meeting_id=raw.meeting_id
+                )
+                .first()
+            )
+
+            if not existing_title:
+                session.add(
+                    MemberJobTitle(
+                        member_id=raw.member_id,
+                        meeting_id=raw.meeting_id,
+                        job_title_english=raw.member_job_title_english,
+                        job_title_welsh=raw.member_job_title_welsh,
+                    )
+                )
+
         session.commit()
-        count = session.query(Member).count()
+
+        member_count = session.query(Member).count()
+        title_count = session.query(MemberJobTitle).count()
+
         session.close()
-        print(f"✓ Members dimension complete: {count} unique members")
+
+        print(f"✓ Members dimension complete: {member_count} unique members")
+        print(f"✓ Member titles complete: {title_count} meeting-specific roles")
     
     def build_procedural_events(self) -> int:
         """

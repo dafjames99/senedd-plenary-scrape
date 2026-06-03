@@ -1,5 +1,5 @@
 """SQLAlchemy models for Senedd speech pipeline."""
-from sqlalchemy import Column, String, Integer, Text, DateTime, Float, ForeignKey, Enum
+from sqlalchemy import Column, String, Integer, Text, DateTime, Float, ForeignKey, Enum, UniqueConstraint
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -26,17 +26,60 @@ class Member(Base):
     __tablename__ = "members"
 
     member_id = Column(Integer, primary_key=True)
+
     name_english = Column(String(255), nullable=False)
     name_welsh = Column(String(255))
-    job_title_english = Column(String(255))
-    job_title_welsh = Column(String(255))
+
     biography_english = Column(Text)
     biography_welsh = Column(Text)
+
     sort_code = Column(String(50))
 
     contributions = relationship("RawContribution", back_populates="member")
     speeches = relationship("Speech", back_populates="speaker")
 
+    job_titles = relationship(
+        "MemberJobTitle",
+        back_populates="member",
+        cascade="all, delete-orphan"
+    )
+    
+class MemberJobTitle(Base):
+    """
+    Meeting-specific member role/title.
+    A member may hold different roles across meetings.
+    """
+    __tablename__ = "member_job_titles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    member_id = Column(
+        Integer,
+        ForeignKey("members.member_id"),
+        nullable=False,
+        index=True
+    )
+
+    meeting_id = Column(
+        Integer,
+        ForeignKey("meetings.meeting_id"),
+        nullable=False,
+        index=True
+    )
+
+    job_title_english = Column(String(255))
+    job_title_welsh = Column(String(255))
+
+    member = relationship("Member", back_populates="job_titles")
+    meeting = relationship("Meeting")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "member_id",
+            "meeting_id",
+            name="uq_member_meeting_title"
+        ),
+    )
 
 class RawContribution(Base):
     """Raw XML ingestion (unmodified source)."""
@@ -121,8 +164,6 @@ class Speech(Base):
     speech_language = Column(String(50))
     speech_text = Column(Text, nullable=False)
 
-    start_time = Column(DateTime)
-    end_time = Column(DateTime)
     source_row_count = Column(Integer)
 
     created_at = Column(DateTime, default=datetime.utcnow)
