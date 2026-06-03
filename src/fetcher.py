@@ -88,6 +88,8 @@ class DataFetcher:
                     download_url = link.get('href', '')
                     if not download_url:
                         continue
+                    if download_url.startswith('/'):
+                        download_url = "https://record.senedd.wales" + download_url
                     
                     # Parse meeting ID from URL
                     meeting_id = download_url.split('meetingID=')[-1].split('&')[0]

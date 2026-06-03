@@ -17,8 +17,9 @@ class Meeting(Base):
     meeting_date = Column(DateTime, nullable=False)
     meeting_type = Column(String(50))
 
-    contributions = relationship("RawContribution", back_populates="meeting")
-    speeches = relationship("Speech", back_populates="meeting")
+    contributions = relationship("RawContribution", back_populates="meeting", cascade="all, delete-orphan")
+    speeches = relationship("Speech", back_populates="meeting", cascade="all, delete-orphan")
+    procedural_events = relationship("ProceduralEvent", back_populates="meeting", cascade="all, delete-orphan")
 
 
 class Member(Base):
@@ -55,14 +56,14 @@ class MemberJobTitle(Base):
 
     member_id = Column(
         Integer,
-        ForeignKey("members.member_id"),
+        ForeignKey("members.member_id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
 
     meeting_id = Column(
         Integer,
-        ForeignKey("meetings.meeting_id"),
+        ForeignKey("meetings.meeting_id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
@@ -86,7 +87,7 @@ class RawContribution(Base):
     __tablename__ = "raw_contributions"
 
     contribution_id = Column(Integer, primary_key=True)
-    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id"), nullable=False)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False)
     assembly = Column(Integer)
     meeting_date = Column(DateTime)
     contribution_order_id = Column(Integer)
@@ -101,7 +102,7 @@ class RawContribution(Base):
 
     contribution_type = Column(String(10))
     attendee_id = Column(Integer)
-    member_id = Column(Integer, ForeignKey("members.member_id"))
+    member_id = Column(Integer, ForeignKey("members.member_id", ondelete="SET NULL"))
     
     # Member metadata (denormalized from XML)
     member_name_english = Column(String(255))
@@ -118,14 +119,15 @@ class RawContribution(Base):
 
     meeting = relationship("Meeting", back_populates="contributions")
     member = relationship("Member", back_populates="contributions")
-    clean = relationship("CleanContribution", back_populates="raw", uselist=False)
+    clean = relationship("CleanContribution", back_populates="raw", uselist=False, cascade="all, delete-orphan")
+    classified = relationship("ClassifiedContribution", back_populates="raw", uselist=False, cascade="all, delete-orphan")
 
 
 class CleanContribution(Base):
     """Text-normalized contributions."""
     __tablename__ = "clean_contributions"
 
-    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id"), primary_key=True)
+    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"), primary_key=True)
     
     # Cleaned text fields (HTML decoded, tags removed, whitespace normalized)
     contribution_verbatim_clean = Column(Text)
@@ -145,9 +147,11 @@ class ClassifiedContribution(Base):
     """Row classification and routing."""
     __tablename__ = "classified_contributions"
 
-    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id"), primary_key=True)
+    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"), primary_key=True)
     row_type = Column(Enum(RowTypeEnum), nullable=False)
     classification_reason = Column(String(255))
+
+    raw = relationship("RawContribution", back_populates="classified")
 
 
 class Speech(Base):
@@ -155,10 +159,10 @@ class Speech(Base):
     __tablename__ = "speeches"
 
     speech_id = Column(Integer, primary_key=True, autoincrement=True)
-    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id"), nullable=False)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False)
     assembly = Column(Integer)
     agenda_item_id = Column(String(100), nullable=False)
-    speaker_id = Column(Integer, ForeignKey("members.member_id"), nullable=False)
+    speaker_id = Column(Integer, ForeignKey("members.member_id", ondelete="CASCADE"), nullable=False)
     speaker_name = Column(String(255), nullable=False)
 
     speech_language = Column(String(50))
@@ -170,8 +174,8 @@ class Speech(Base):
 
     meeting = relationship("Meeting", back_populates="speeches")
     speaker = relationship("Member", back_populates="speeches")
-    parts = relationship("SpeechPart", back_populates="speech")
-    embeddings = relationship("SpeechEmbedding", back_populates="speech")
+    parts = relationship("SpeechPart", back_populates="speech", cascade="all, delete-orphan")
+    embeddings = relationship("SpeechEmbedding", back_populates="speech", cascade="all, delete-orphan")
 
 
 class SpeechPart(Base):
@@ -179,8 +183,8 @@ class SpeechPart(Base):
     __tablename__ = "speech_parts"
 
     speech_part_id = Column(Integer, primary_key=True, autoincrement=True)
-    speech_id = Column(Integer, ForeignKey("speeches.speech_id"), nullable=False)
-    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id"), nullable=False)
+    speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=False)
+    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"), nullable=False)
 
     contribution_order_id = Column(Integer)
     contribution_time = Column(DateTime)
@@ -196,7 +200,7 @@ class ProceduralEvent(Base):
     __tablename__ = "procedural_events"
 
     procedural_id = Column(Integer, primary_key=True, autoincrement=True)
-    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id"), nullable=False)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False)
     agenda_item_id = Column(String(100))
 
     event_time = Column(DateTime)
@@ -204,8 +208,10 @@ class ProceduralEvent(Base):
     speaker_name = Column(String(255))
 
     raw_text = Column(Text)
-    source_contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id"))
+    source_contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"))
     senedd_tv_url = Column(String(500))
+
+    meeting = relationship("Meeting", back_populates="procedural_events")
 
 
 class SpeechEmbedding(Base):
@@ -213,7 +219,7 @@ class SpeechEmbedding(Base):
     __tablename__ = "speech_embeddings"
 
     embedding_id = Column(Integer, primary_key=True, autoincrement=True)
-    speech_id = Column(Integer, ForeignKey("speeches.speech_id"), nullable=False)
+    speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=False)
 
     embedding_vector = Column(Text)  # JSON serialized float array
     model_name = Column(String(100))
