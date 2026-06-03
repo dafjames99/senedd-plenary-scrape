@@ -112,6 +112,8 @@ class DataFetcher:
             logger.error(f"Error parsing XMLExport page: {e}")
             return []
         
+        # Sort meetings chronologically from oldest to newest
+        new_meetings.sort(key=lambda m: m.meeting_date)
         logger.info(f"Found {len(new_meetings)} new meetings")
         return new_meetings
     
