@@ -1,1 +1,0 @@
-- [ ] Speech-concatentation in ENGLISH ONLY: Currently, speeches concatenate based on `contribution_verbatim`. This could be problematic when speakers switch languages between the speech_parts (e.g. contribution_id: [762699, 762660, 762664, 762671, 762683, 762685] from meeting_id 16060 - one long speech, welsh-> english -> welsh).
