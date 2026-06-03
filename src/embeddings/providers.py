@@ -1,13 +1,16 @@
 import os
+from tqdm import tqdm
+from dotenv import load_dotenv
 from typing import List
 from .base import BaseEmbeddingProvider
-
+load_dotenv()
 class SentenceTransformersProvider(BaseEmbeddingProvider):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         # Deferred import so you don't need torch/sentence-transformers installed to run other providers
         from sentence_transformers import SentenceTransformer
+        self.key = os.getenv("HF_TOKEN")
         self._model_name = model_name
-        self.model = SentenceTransformer(model_name)
+        self.model = SentenceTransformer(model_name, token = self.key)
         
     @property
     def model_name(self) -> str:
@@ -19,9 +22,11 @@ class SentenceTransformersProvider(BaseEmbeddingProvider):
 
 
 class OllamaProvider(BaseEmbeddingProvider):
-    def __init__(self, model_name: str = "nomic-embed-text", base_url: str = "http://localhost:11434"):
+    def __init__(self, model_name: str = None, base_url: str = None):
         import ollama
-        self._model_name = model_name
+        if base_url is None:
+            base_url = os.getenv("OLLAMA_URL")
+        self._model_name = model_name or os.getenv("EMBEDDING_MODEL")
         self.client = ollama.Client(host=base_url)
         
     @property
@@ -31,9 +36,9 @@ class OllamaProvider(BaseEmbeddingProvider):
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         # Ollama handles batches sequentially or natively depending on the model/server config
         results = []
-        for text in texts:
-            response = self.client.embeddings(model=self._model_name, prompt=text)
-            results.append(response['embedding'])
+        for text in tqdm(texts, "Embedding texts ...", total = len(texts)):
+            response = self.client.embed(model=self._model_name, input=text)
+            results.append(response['embeddings'])
         return results
 
 
