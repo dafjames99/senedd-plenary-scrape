@@ -220,10 +220,11 @@ class SpeechEmbedding(Base):
 
     embedding_id = Column(Integer, primary_key=True, autoincrement=True)
     speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=False)
-
+    chunk_index = Column(Integer)
+    chunk_text = Column(Text)
     embedding_vector = Column(Text)  # JSON serialized float array
     model_name = Column(String(100))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
     speech = relationship("Speech", back_populates="embeddings")
 
