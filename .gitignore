@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.python-version
+
+# Databases (generated)
+*.db
+senedd_records.db
+
+# Raw data files
+data/
+data/*.xml
+
+# IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS
+.DS_Store
+Thumbs.db
