@@ -134,6 +134,23 @@ class SeneddPipeline:
         print(f"✓ Reconstructed {total_speeches} speeches from grouped contributions")
         return total_speeches
 
+    def _deduplicate_overlap(self, existing_text: str, new_text: str) -> str:
+        """Removes overlapping words at the boundary of two text segments."""
+        existing_words = existing_text.strip().split()
+        new_words = new_text.strip().split()
+        
+        if not existing_words or not new_words:
+            return new_text
+
+        # Check for overlapping phrases, starting from the longest possible match
+        max_overlap = min(len(existing_words), len(new_words))
+        for i in range(max_overlap, 0, -1):
+            if existing_words[-i:] == new_words[:i]:
+                # Found a match! Return the new text minus the overlapping prefix
+                return " ".join(new_words[i:])
+                
+        return new_text
+
     def _reconstruct_meeting_speeches(self, session: Session, meeting_id: int) -> int:
         """Reconstruct speeches for a specific meeting chronologically."""
         meeting = session.query(Meeting).filter_by(meeting_id=meeting_id).first()
@@ -185,8 +202,15 @@ class SeneddPipeline:
                 text = clean.contribution_verbatim_clean
                 
             if text:
-                current_speech['texts'].append(text)
-                
+                if not current_speech['texts']:
+                    current_speech['texts'].append(text)
+                else:
+                    # Reconstruct the current string to check against
+                    current_full_text = " ".join(current_speech['texts'])
+                    processed_text = self._deduplicate_overlap(current_full_text, text)
+                    if processed_text: # Avoid appending empty strings if it was a total duplicate
+                        current_speech['texts'].append(processed_text)
+
             current_speech['speech_parts'].append({
                 'contribution_id': raw.contribution_id,
                 'contribution_order_id': raw.contribution_order_id,
