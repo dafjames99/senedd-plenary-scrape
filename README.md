@@ -113,6 +113,12 @@ flowchart TD
     H --> I[6. Validate<br/>Traceability & Integrity]
 ```
 
+### Continual Updates & Idempotency
+
+The pipeline is designed around a unified, idempotent processing model:
+- **Stateless Parsing**: XML extraction is decoupled from the database model in `src/parser.py`, outputting pure Python types.
+- **Atomic Transactions**: Meetings are processed as uniform atomic chunks. All transformation stages for a single `meeting_id` run inside a single database transaction (`with session.begin()`). If any stage fails, the entire meeting is rolled back.
+- **Auto-Cleanup (Idempotence)**: Reprocessing an existing meeting is fully safe and does not duplicate data. Cascading foreign keys (`ondelete="CASCADE"`) and ORM relationship cascades (`cascade="all, delete-orphan"`) automatically purge previous Speeches, SpeechParts, and ProceduralEvents when new ones are written.
 
 ### Pipeline Modes
 
@@ -140,27 +146,22 @@ python3 main.py --mode incremental --keep-xml  # Retain XML files
    - Store vectors in `speech_embeddings` table (schema ready)
    - Enable semantic search and similarity queries
 
-2. **Incremental Processing**
-   - Auto-detect new meetings via Senedd API
-   - Append to existing database without re-processing
-   - Resumable checkpoints for fault tolerance
-
-3. **Speaker Analytics Dashboard**
+2. **Speaker Analytics Dashboard**
    - Contribution frequency charts
    - Speech length analysis by speaker
    - Topic tagging and discourse analysis
 
-4. **Video Alignment**
+3. **Video Alignment**
    - Link speeches to seneddTv timestamps
    - Find exact locations in parliament recording
    - Multi-language alignment
 
-5. **Streaming Pipeline**
+4. **Streaming Pipeline**
    - Chunked XML parsing instead of `pd.read_xml()`
    - Batch database writes for memory efficiency
    - Support for very large files
 
-6. **Member History Tracking**
+5. **Member History Tracking**
    - Track job title changes over time
    - Add `member_history` table for temporal queries
    - Enable historical analysis
