@@ -2,44 +2,28 @@
 import html
 import re
 from bs4 import BeautifulSoup
-from typing import Optional
+from typing import Optional, Tuple
 
 
-def clean_transcript(text: Optional[str]) -> Optional[str]:
-    """
-    Clean transcript text: double HTML unescape, normalize whitespace.
-    Returns None if text becomes empty after cleaning.
-    """
-    if not isinstance(text, str) or not text:
-        return None
+def double_unescape_html(text: str):
+    return html.unescape(html.unescape(text))
+
+
+def remove_html_tags(text: Optional[str]) -> Optional[str]:
+    """Remove HTML tags from text."""
+    return BeautifulSoup(text, "html.parser").get_text("")
+
     
-    # Double unescape HTML entities
-    text = html.unescape(html.unescape(text))
-    
-    # Replace non-breaking space with regular space
+def normalize_and_clean(text: Optional[str]) -> Optional[str]:
     text = text.replace("\xa0", " ")
-    
-    # Normalize multiple spaces to single space
     text = re.sub(r"\s+", " ", text)
-    
-    # Fix spacing before punctuation
     text = re.sub(r"\s+\.\s*", ". ", text)
     text = re.sub(r"\s+,", ",", text)
     text = re.sub(r"\s+\?", "?", text)
     text = re.sub(r"\s+!", "!", text)
     
     text = text.strip()
-    return text if text else None
-
-
-def remove_html_tags(text: Optional[str]) -> Optional[str]:
-    """Remove HTML tags from text."""
-    if not isinstance(text, str) or not text:
-        return None
-    
-    text = BeautifulSoup(text, "html.parser").get_text("")
-    text = text.strip()
-    return text if text else None
+    return text
 
 
 def clean_contribution_verbatim(text: Optional[str]) -> Optional[str]:
@@ -53,25 +37,14 @@ def clean_contribution_verbatim(text: Optional[str]) -> Optional[str]:
     if not isinstance(text, str) or not text:
         return None
     
-    # Step 1: HTML unescape (twice)
-    text = html.unescape(html.unescape(text))
+    text = double_unescape_html(text)
+    text = remove_html_tags(text)
+    text = normalize_and_clean(text)
     
-    # Step 2: Remove HTML tags
-    text = BeautifulSoup(text, "html.parser").get_text("")
-    
-    # Step 3: Normalize whitespace and clean up
-    text = text.replace("\xa0", " ")
-    text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"\s+\.\s*", ". ", text)
-    text = re.sub(r"\s+,", ",", text)
-    text = re.sub(r"\s+\?", "?", text)
-    text = re.sub(r"\s+!", "!", text)
-    
-    text = text.strip()
     return text if text else None
 
 
-def classify_contribution(row: dict) -> tuple[str, str]:
+def classify_contribution(row: dict) -> Tuple[str, str]:
     """
     Classify a contribution row as speech/procedural/noise.
     
@@ -80,6 +53,7 @@ def classify_contribution(row: dict) -> tuple[str, str]:
     Classification rules:
     - PROCEDURAL: Llywydd title OR contribution_type in {I, B}
     - NOISE: no Member_Id AND no text
+    - ORAL_QUESTION: contribution_type in {O}
     - SPEECH: Member_Id present AND not Llywydd AND has text
     """
     
@@ -96,6 +70,8 @@ def classify_contribution(row: dict) -> tuple[str, str]:
     if contribution_type in ['I', 'B']:
         return ('procedural', f'Contribution type {contribution_type}')
     
+    if contribution_type == 'O':
+        return ('oral-question', f'Contribution type {contribution_type}')
     # Check if row is noise (no speaker, no text)
     if not member_id and not text:
         return ('noise', 'No speaker and no text')
@@ -106,3 +82,32 @@ def classify_contribution(row: dict) -> tuple[str, str]:
     
     # Fallback: noise
     return ('noise', 'Insufficient content')
+
+
+def parse_oral_question_meta(text: str) -> Tuple[Optional[int], Optional[str], str]:
+    """Extracts question number and ID from a single string instance,
+    returning the cleaned text alongside the metadata.
+    
+    Returns:
+        Tuple[Optional[int], Optional[str], str]: (question_number, question_id, clean_text)
+    """
+    if not text:
+        return None, None, ""
+
+    text_stripped = text.strip().strip('"\'')
+
+    pattern = (
+        r"^\s*(?P<question_num>\d+)\.\s*(?P<clean_text>.*?)\s*(?P<question_id>OQ\d+)\s*$"
+    )
+    
+    match = re.match(pattern, text_stripped)
+    
+    if match:
+        extracted = match.groupdict()
+        return (
+            int(extracted['question_num']), 
+            extracted['question_id'], 
+            extracted['clean_text'].strip()
+        )
+    
+    return None, None, text.strip()

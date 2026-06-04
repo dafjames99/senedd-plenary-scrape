@@ -9,9 +9,9 @@ from sqlalchemy.orm import sessionmaker, Session
 from src.db_schema import (
     Base, Meeting, Member, MemberJobTitle, RawContribution, CleanContribution, 
     ClassifiedContribution, Speech, SpeechPart, ProceduralEvent, 
-    RowTypeEnum, SyncCheckpoint
+    RowTypeEnum, SyncCheckpoint, OralQuestion
 )
-from src.transformers import classify_contribution, clean_contribution_verbatim
+from src.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
 from src.fetcher import DataFetcher
 from src.parser import parse_senedd_xml
 
@@ -54,47 +54,22 @@ class SeneddPipeline:
             
         print(f"✓ Ingested {len(contributions_list)} raw contributions")
         return len(contributions_list)
+
     
-    def clean_text_fields(self, session: Session, meeting_id: Optional[int] = None) -> int:
+    def process_and_classify_contributions(self, session: Session, meeting_id: Optional[int] = None):
+        """Combines text cleaning, metadata extraction, and row classification 
+
+        into a unified execution phase.
         """
-        Phase 2: Clean text fields and store in clean_contributions.
-        Applies: HTML double-unescape, tag removal, whitespace normalization.
-        Returns: number of rows cleaned
-        """
-        print(f"\nPhase 2: Cleaning text fields for meeting_id={meeting_id}")
+        print(f"\nPhase 2/3: Processing and Classifying contributions for meeting_id={meeting_id}")
+        
         query = session.query(RawContribution)
         if meeting_id:
             query = query.filter(RawContribution.meeting_id == meeting_id)
         raw_contribs = query.all()
         
         for raw in raw_contribs:
-            cleaned_verbatim = clean_contribution_verbatim(raw.contribution_verbatim)
-            cleaned_translated = clean_contribution_verbatim(raw.contribution_translated)
-            
-            clean = CleanContribution(
-                contribution_id=raw.contribution_id,
-                contribution_verbatim_clean=cleaned_verbatim,
-                contribution_translated_clean=cleaned_translated,
-            )
-            session.merge(clean)
-        
-        print(f"✓ Cleaned {len(raw_contribs)} contributions")
-        return len(raw_contribs)
-    
-    def classify_rows(self, session: Session, meeting_id: Optional[int] = None) -> dict:
-        """
-        Phase 3: Classify contributions as speech/procedural/noise.
-        Returns: classification counts
-        """
-        print(f"\nPhase 3: Classifying rows for meeting_id={meeting_id}")
-        query = session.query(RawContribution)
-        if meeting_id:
-            query = query.filter(RawContribution.meeting_id == meeting_id)
-        raw_contribs = query.all()
-        
-        counts = {'speech': 0, 'procedural': 0, 'noise': 0}
-        
-        for raw in raw_contribs:
+
             row_dict = {
                 'Member_Id': raw.member_id,
                 'Member_job_title_English': raw.member_job_title_english,
@@ -102,18 +77,43 @@ class SeneddPipeline:
                 'contribution_verbatim': raw.contribution_verbatim,
                 'contribution_translated': raw.contribution_translated,
             }
-            
             row_type, reason = classify_contribution(row_dict)
+            cleaned_verbatim = clean_contribution_verbatim(raw.contribution_verbatim)
+            cleaned_translated = clean_contribution_verbatim(raw.contribution_translated)
+
+            if row_type == "oral-question":
+                q_num, q_id, clean_text = parse_oral_question_meta(cleaned_verbatim)
+                
+                if q_id and q_num:
+
+                    cleaned_verbatim = clean_text
+
+                    if cleaned_translated:
+                        _, _, clean_trans_text = parse_oral_question_meta(cleaned_translated)
+                        cleaned_translated = clean_trans_text
+                    
+                    oral_q = OralQuestion(
+                        question_id=q_id,
+                        meeting_id=raw.meeting_id,
+                        contribution_id=raw.contribution_id,
+                        question_number=q_num,
+                    )
+                    session.merge(oral_q)
+
+            clean = CleanContribution(
+                contribution_id=raw.contribution_id,
+                contribution_verbatim_clean=cleaned_verbatim,
+                contribution_translated_clean=cleaned_translated,
+            )
             classified = ClassifiedContribution(
                 contribution_id=raw.contribution_id,
                 row_type=RowTypeEnum(row_type),
                 classification_reason=reason,
             )
+            
+            session.merge(clean)
             session.merge(classified)
-            counts[row_type] += 1
-        
-        print(f"✓ Classification: speech={counts['speech']}, procedural={counts['procedural']}, noise={counts['noise']}")
-        return counts
+    
     
     def reconstruct_speeches(self, session: Session, meeting_id: Optional[int] = None) -> int:
         """
@@ -166,7 +166,7 @@ class SeneddPipeline:
             CleanContribution, RawContribution.contribution_id == CleanContribution.contribution_id
         ).filter(
             RawContribution.meeting_id == meeting_id,
-            ClassifiedContribution.row_type == RowTypeEnum.SPEECH
+            ((ClassifiedContribution.row_type == RowTypeEnum.SPEECH) | (ClassifiedContribution.row_type == RowTypeEnum.ORAL_QUESTION))
         ).order_by(
             RawContribution.contribution_order_id
         ).all()
@@ -408,8 +408,7 @@ class SeneddPipeline:
     def process_meetings(self, session: Session, meeting_ids: List[int]):
         """Run all pipeline transformation phases for a list of meeting IDs atomically."""
         for m_id in meeting_ids:
-            self.clean_text_fields(session, m_id)
-            self.classify_rows(session, m_id)
+            self.process_and_classify_contributions(session, m_id)
             self.reconstruct_speeches(session, m_id)
             self.build_members_dimension(session, m_id)
             self.build_procedural_events(session, m_id)

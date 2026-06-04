@@ -141,6 +141,7 @@ class RowTypeEnum(enum.Enum):
     SPEECH = "speech"
     PROCEDURAL = "procedural"
     NOISE = "noise"
+    ORAL_QUESTION = "oral-question"
 
 
 class ClassifiedContribution(Base):
@@ -153,6 +154,18 @@ class ClassifiedContribution(Base):
 
     raw = relationship("RawContribution", back_populates="classified")
 
+class OralQuestion(Base):
+    """
+    Formal metadata for oral questions tabled in the Senedd.
+    Maps 1:1 or 1:Many back to the raw/clean contribution that introduced it.
+    """
+    __tablename__ = "oral_questions"
+
+    question_id = Column(String(50), primary_key=True) # e.g., 'OQ64075'
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"), nullable=False, unique=True)
+    
+    question_number = Column(Integer, nullable=False) # e.g., 1
 
 class Speech(Base):
     """Core semantic unit: reconstructed speech from grouped contributions."""
