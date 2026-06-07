@@ -1,41 +1,44 @@
+import json
+import logging
 from datetime import datetime
 from sqlalchemy import select, create_engine
 from sqlalchemy.orm import sessionmaker, Session
-import os
-import json
-import sqlite3
-from typing import List, Dict, Any
+from typing import List
+
 from src.db_schema import (
     Speech, SpeechEmbedding
 )
-from .config import MODEL_METADATA_REGISTRY
+from src.settings import settings
 from .base import BaseEmbeddingProvider
 from .chunker import chunk_text
 from .providers import PROVIDER_REGISTER
-from dotenv import load_dotenv
+from .config import MODEL_METADATA_REGISTRY
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 class EmbeddingPipeline:
     def __init__(self, provider: BaseEmbeddingProvider = None, db_path: str = None):
-        db_path = db_path or os.getenv("DATABASE_URL")
+        db_path = db_path or settings.database_url
         self.engine = create_engine(db_path)
         self.SessionLocal = sessionmaker(bind=self.engine)
         
-        if provider is None:
-            assert os.getenv("EMBEDDING_PROVIDER") in list(PROVIDER_REGISTER.keys()), f"env var for EMBEDDING_PROVIDER must be one of: {list(PROVIDER_REGISTER.keys())}"
-            self.provider = provider or PROVIDER_REGISTER[os.getenv("EMBEDDING_PROVIDER")](os.getenv("EMBEDDING_MODEL"))
-        else:
-            self.provider = provider
+        self.provider = provider or PROVIDER_REGISTER[settings.embedding_provider](settings.embedding_model)
         self.model_meta = MODEL_METADATA_REGISTRY.get(self.provider.model_name, None)
         
         if self.model_meta is None:
             raise ValueError(f"{self.provider} & {self.provider.model_name} are not valid.")
 
     def get_unembedded_speeches(self, session: Session, limit: int = 100) -> List[Speech]:
-        """Finds speeches that do not yet exist in the speech_embeddings table."""
+        """
+        Finds speeches that do not yet exist in the speech_embeddings table 
+        SPECIFICALLY for the currently active provider model name.
+        """
         stmt = (
             select(Speech)
-            .outerjoin(Speech.embeddings)
+            .outerjoin(
+                SpeechEmbedding,
+                (Speech.speech_id == SpeechEmbedding.speech_id) &
+                (SpeechEmbedding.model_name == self.provider.model_name)
+            )
             .where(SpeechEmbedding.speech_id == None)
             .where(Speech.speech_text != None)
             .where(Speech.speech_text != "")
@@ -43,6 +46,18 @@ class EmbeddingPipeline:
         )
         result = session.execute(stmt)
         return list(result.scalars().all())
+
+    def purge_active_model_embeddings(self):
+        """Deletes all existing database rows associated with the active model."""
+        with self.SessionLocal() as session:
+            with session.begin():
+                logger.warning(
+                    "Purging all database vectors matching model target: %s", 
+                    self.provider.model_name
+                )
+                session.query(SpeechEmbedding).filter(
+                    SpeechEmbedding.model_name == self.provider.model_name
+                ).delete(synchronize_session=False)
 
     def run(self, batch_size: int = 100):
         """Runs one batch cycle of fetching, chunking, embedding, and saving."""
@@ -54,10 +69,10 @@ class EmbeddingPipeline:
             speeches = self.get_unembedded_speeches(session, limit=batch_size)
             
             if not speeches:
-                print("✓ No new speeches to embed.")
+                logger.info("No new speeches to embed. Hibernating")
                 return
 
-            print(f"Processing {len(speeches)} speeches from database...")
+            logger.info("Processing %d speeches from database.", len(speeches))
             
             chunks_to_embed = []
             metadata_payloads = []
@@ -78,7 +93,7 @@ class EmbeddingPipeline:
                 return
 
             # 2. Compute vectors via your injected strategy provider
-            print(f"Generating vectors for {len(chunks_to_embed)} chunks using {self.provider.model_name}...")
+            logger.info("Generating vectors for %d chunks using Model=%s", len(chunks_to_embed), self.provider.model_name)
             vectors = self.provider.embed_batch(chunks_to_embed)
             
             # 3. Build SpeechEmbedding objects and commit them to the database
@@ -97,8 +112,8 @@ class EmbeddingPipeline:
             try:
                 session.add_all(embedding_objects)
                 session.commit()
-                print(f"✓ Successfully embedded and saved {len(embedding_objects)} records.")
+                logger.info("Successfully embedded and saved %d records.", len(embedding_objects))
             except Exception as e:
                 session.rollback()
-                print(f"❌ Error during database insertion, rolling back transaction. Details: {e}")
+                logger.error("Error during database insertion, rolling back transaction. Details: %s", e)
                 raise e

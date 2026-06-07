@@ -205,17 +205,6 @@ wheels = [
 ]
 
 [[package]]
-name = "dotenv"
-version = "0.9.9"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "python-dotenv" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b2/b7/545d2c10c1fc15e48653c91efde329a790f2eecfbbf2bd16003b5db2bab0/dotenv-0.9.9-py2.py3-none-any.whl", hash = "sha256:29cf74a087b31dafdb5a446b6d7e11cbce8ed2741540e2339c69fbef92c94ce9", size = 1892, upload-time = "2025-02-19T22:15:01.647Z" },
-]
-
-[[package]]
 name = "filelock"
 version = "3.29.1"
 source = { registry = "https://pypi.org/simple" }
@@ -857,6 +846,20 @@ wheels = [
 ]
 
 [[package]]
+name = "pydantic-settings"
+version = "2.14.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/07/60/1d1e59c9c90d54591469ada7d268251f71c24bdb765f1a8a832cee8c6653/pydantic_settings-2.14.1.tar.gz", hash = "sha256:e874d3bec7e787b0c9958277956ed9b4dd5de6a80e162188fdaff7c5e26fd5fa", size = 235551, upload-time = "2026-05-08T13:40:06.542Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ae/8d/f1af3832f5e6eb13ba94ee809e72b8ecb5eef226d27ee0bef7d963d943c7/pydantic_settings-2.14.1-py3-none-any.whl", hash = "sha256:6e3c7edfd8277687cdc598f56e5cff0e9bfff0910a3749deaa8d4401c3a2b9de", size = 60964, upload-time = "2026-05-08T13:40:04.958Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1066,9 +1069,9 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "bs4" },
-    { name = "dotenv" },
     { name = "lxml" },
     { name = "pandas" },
+    { name = "pydantic-settings" },
     { name = "requests" },
     { name = "sqlalchemy" },
 ]
@@ -1087,11 +1090,11 @@ sentence-transformer = [
 [package.metadata]
 requires-dist = [
     { name = "bs4", specifier = ">=0.0.2" },
-    { name = "dotenv", specifier = ">=0.9.9" },
     { name = "lxml", specifier = ">=6.1.1" },
     { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.6.2" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.40.0" },
     { name = "pandas", specifier = ">=3.0.3" },
+    { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "sentence-transformers", marker = "extra == 'sentence-transformer'", specifier = ">=5.5.1" },
     { name = "sqlalchemy", specifier = ">=2.0.50" },

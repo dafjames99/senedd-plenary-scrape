@@ -14,7 +14,9 @@ from src.db_schema import (
 from src.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
 from src.fetcher import DataFetcher
 from src.parser import parse_senedd_xml
+import logging
 
+logger = logging.getLogger(__name__)
 
 class SeneddPipeline:
     """Orchestrator for XML parsing, cleaning, classification, and speech reconstruction."""
@@ -27,15 +29,14 @@ class SeneddPipeline:
     def create_schema(self):
         """Create all tables in the database."""
         Base.metadata.create_all(self.engine)
-        print("✓ Schema created")
+        logger.info("Database schema created successfully.")
         
     def ingest_xml(self, session: Session, xml_file: Path) -> int:
         """
         Phase 1: Parse XML and load into raw_contributions, meetings, and members.
         Returns: number of rows ingested
         """
-        print(f"\nPhase 1: Ingesting XML from {xml_file}")
-        
+        logger.info("Phase 1: Ingesting XML payload from path source: %s", xml_file)
         meeting_data, members_list, contributions_list = parse_senedd_xml(xml_file)
         
         # Merge meeting
@@ -52,7 +53,7 @@ class SeneddPipeline:
             contrib = RawContribution(**contrib_data)
             session.merge(contrib)
             
-        print(f"✓ Ingested {len(contributions_list)} raw contributions")
+        logger.info("Successfully ingested %d raw contribution rows.", len(contributions_list))
         return len(contributions_list)
 
     
@@ -61,12 +62,14 @@ class SeneddPipeline:
 
         into a unified execution phase.
         """
-        print(f"\nPhase 2/3: Processing and Classifying contributions for meeting_id={meeting_id}")
+        logger.info("Phase 2/3: Processing and classifying rows for meeting_id=%s", meeting_id)
         
         query = session.query(RawContribution)
         if meeting_id:
             query = query.filter(RawContribution.meeting_id == meeting_id)
         raw_contribs = query.all()
+        
+        logger.debug("Found %d raw rows available for pipeline transformation workflows.", len(raw_contribs))
         
         for raw in raw_contribs:
 
@@ -85,7 +88,7 @@ class SeneddPipeline:
                 q_num, q_id, clean_text = parse_oral_question_meta(cleaned_verbatim)
                 
                 if q_id and q_num:
-
+                    logger.debug("Extracted Oral Question entity metadata: ID=%s, Num=%s", q_id, q_num)
                     cleaned_verbatim = clean_text
 
                     if cleaned_translated:
@@ -121,7 +124,7 @@ class SeneddPipeline:
         Speech boundary: speaker changes OR agenda changes.
         Returns: number of speeches created
         """
-        print(f"\nPhase 4: Reconstructing speeches for meeting_id={meeting_id}")
+        logger.info("Phase 4: Initiating speech reconstruction logic. Target filter: meeting_id=%s", meeting_id)
         if meeting_id is not None:
             meeting_ids = [meeting_id]
         else:
@@ -131,7 +134,7 @@ class SeneddPipeline:
         for m_id in meeting_ids:
             total_speeches += self._reconstruct_meeting_speeches(session, m_id)
             
-        print(f"✓ Reconstructed {total_speeches} speeches from grouped contributions")
+        logger.info("Successfully consolidated %d semantic speech blocks from row sequences.", total_speeches)
         return total_speeches
 
     def _deduplicate_overlap(self, existing_text: str, new_text: str) -> str:
@@ -155,6 +158,7 @@ class SeneddPipeline:
         """Reconstruct speeches for a specific meeting chronologically."""
         meeting = session.query(Meeting).filter_by(meeting_id=meeting_id).first()
         if not meeting:
+            logger.warning("Aborting speech reconstruction: meeting_id=%s does not exist in schema references.", meeting_id)
             return 0
             
         # Get all speech-classified rows, ordered by contribution_order_id
@@ -251,13 +255,14 @@ class SeneddPipeline:
             new_speeches.append(speech)
             
         meeting.speeches = new_speeches
+        logger.debug("Meeting %s: Grouped %d individual speeches.", meeting_id, len(new_speeches))
         return len(new_speeches)
     
     def build_members_dimension(self, session: Session, meeting_id: Optional[int] = None):
         """
         Phase 5a: Build/complete members dimension table.
         """
-        print(f"\nPhase 5a: Building members dimension for meeting_id={meeting_id}")
+        logger.info("Phase 5a: Compiling members dimension constraints for meeting_id=%s", meeting_id)
         query = session.query(RawContribution).filter(
             RawContribution.member_id.isnot(None)
         )
@@ -304,14 +309,13 @@ class SeneddPipeline:
 
         member_count = session.query(Member).count()
         title_count = session.query(MemberJobTitle).count()
-        print(f"✓ Members dimension complete: {member_count} unique members")
-        print(f"✓ Member titles complete: {title_count} meeting-specific roles")
+        logger.info("Dimension builds complete. Registry metrics -> Unique Members: %d | Roles Matrix Entries: %d", member_count, title_count)
     
     def build_procedural_events(self, session: Session, meeting_id: Optional[int] = None) -> int:
         """
         Phase 5b: Extract procedural events.
         """
-        print(f"\nPhase 5b: Building procedural events for meeting_id={meeting_id}")
+        logger.info("Phase 5b: Processing non-speech procedural entities for meeting_id=%s", meeting_id)
         if meeting_id is not None:
             meeting_ids = [meeting_id]
         else:
@@ -321,7 +325,7 @@ class SeneddPipeline:
         for m_id in meeting_ids:
             total_events += self._build_meeting_procedural_events(session, m_id)
             
-        print(f"✓ Procedural events: {total_events} entries")
+        logger.info("Successfully synchronized %d discrete procedural logs.", total_events)
         return total_events
 
     def _build_meeting_procedural_events(self, session: Session, meeting_id: int) -> int:
@@ -361,7 +365,7 @@ class SeneddPipeline:
         Phase 6: Validate pipeline output.
         Returns: validation report
         """
-        print("\nPhase 6: Validating pipeline")
+        logger.info("Phase 6: Executing data-lineage and database structural integrity validation tests.")
         session = self.SessionLocal()
         
         report = {
@@ -387,21 +391,29 @@ class SeneddPipeline:
         report['empty_speeches'] = empty_speeches
         
         session.close()
+        # Log data anomalies as warnings or errors based on threshold flags
+        if missing_traceability > 0:
+            logger.warning("Lineage tracking structural gap detected: %d speeches lack corresponding records in speech_parts.", missing_traceability)
+        if empty_speeches > 0:
+            logger.error("Data Quality Exception: Found %d speech records containing empty or null text strings.", empty_speeches)
         
-        print("\n" + "="*60)
-        print("VALIDATION REPORT")
-        print("="*60)
-        print(f"Raw contributions ingested:        {report['raw_contributions']}")
-        print(f"Cleaned contributions:             {report['clean_contributions']}")
-        print(f"Classified contributions:          {report['classified_contributions']}")
-        print(f"Reconstructed speeches:            {report['speeches']}")
-        print(f"Speech parts (lineage):            {report['speech_parts']}")
-        print(f"Unique members:                    {report['members']}")
-        print(f"Procedural events:                 {report['procedural_events']}")
-        print(f"Speeches with parts:               {report['speeches_with_parts']}")
-        print(f"Missing traceability:              {report['missing_traceability']}")
-        print(f"Empty speeches (data quality):     {report['empty_speeches']}")
-        print("="*60)
+        logger.info(
+            "\n"
+            "============================================================\n"
+            "                     VALIDATION REPORT                      \n"
+            "============================================================\n"
+            f"Raw contributions ingested:        {report['raw_contributions']}\n"
+            f"Cleaned contributions:             {report['clean_contributions']}\n"
+            f"Classified contributions:          {report['classified_contributions']}\n"
+            f"Reconstructed speeches:            {report['speeches']}\n"
+            f"Speech parts (lineage):            {report['speech_parts']}\n"
+            f"Unique members:                    {report['members']}\n"
+            f"Procedural events:                 {report['procedural_events']}\n"
+            f"Speeches with parts:               {report['speeches_with_parts']}\n"
+            f"Missing traceability:              {report['missing_traceability']}\n"
+            f"Empty speeches (data quality):     {report['empty_speeches']}\n"
+            "============================================================"
+        )
         
         return report
 
@@ -415,13 +427,10 @@ class SeneddPipeline:
     
     def run_full_pipeline(self, xml_file: Path):
         """Run all pipeline phases (fresh rebuild)."""
-        print("\n" + "="*60)
-        print("SENEDD XML → SPEECH RECONSTRUCTION PIPELINE (FULL REBUILD)")
-        print("="*60)
-        
+        logger.info("Initializing full pipeline database reset and sync routine execution sequence.")
         # Drop existing schema for fresh start
         Base.metadata.drop_all(self.engine)
-        print("✓ Dropped existing schema")
+        logger.info("Dropped all tables from schema target.")
         
         self.create_schema()
         
@@ -441,7 +450,7 @@ class SeneddPipeline:
                     self.process_meetings(session, [m_id])
                     
         self.validate_pipeline()
-        print("\n✓ Pipeline complete!")
+        logger.info("Full orchestration sequence complete without unhandled pipeline errors.")
 
     def get_last_sync_date(self, session: Session) -> datetime:
         """Get the date of the most recent processed meeting from sync checkpoints."""
@@ -466,9 +475,7 @@ class SeneddPipeline:
         """
         Run incremental pipeline: fetch → parse → transform → upsert.
         """
-        print("\n" + "="*60)
-        print("SENEDD INCREMENTAL PIPELINE")
-        print("="*60)
+        logger.info("Initializing scheduled incremental compilation workflow task.")
         
         if data_dir is None:
             data_dir = Path("data")
@@ -481,26 +488,26 @@ class SeneddPipeline:
         with self.SessionLocal() as session:
             if last_sync_date is None:
                 last_sync_date = self.get_last_sync_date(session)
-            print(f"Checking for meetings since: {last_sync_date.date()}")
+            logger.info("Scanning index registry for plenary meetings uploaded since target timestamp: %s", last_sync_date.date())
             
         # Detect and download new meetings
         new_meetings = fetcher.check_for_updates(last_sync_date)
         if not new_meetings:
-            print("No new meetings found.")
+            logger.info("No incremental updates found on remote Senedd feeds. Hibernating.")
             return
         
-        print(f"Found {len(new_meetings)} new meeting(s)")
+        logger.info("Discovered %d new plenary session transcripts requiring transformation processing.", len(new_meetings))
         
         # Process each meeting
         files_processed = 0
         for meeting in new_meetings:
             meeting_id = int(meeting.meeting_id)
-            print(f"\n--- Processing Meeting {meeting_id} ---")
+            logger.info("Starting targeted extraction process loop on Meeting ID context scope: %s", meeting_id)
             
             # Download XML
             xml_path = fetcher.download_file(meeting, data_dir)
             if not xml_path or not xml_path.exists():
-                print(f"✗ Failed to download meeting {meeting_id}, skipping")
+                logger.error("HTTP Fetch Error: Download payload validation failed for meeting resource: %s. Skipping target entry.", meeting_id)
                 continue
             
             try:
@@ -517,7 +524,7 @@ class SeneddPipeline:
                 files_processed += 1
                 
             except Exception as e:
-                print(f"✗ Failed to process meeting {meeting_id}: {e}")
+                logger.exception("Pipeline Engine Failure: Fatal exception encountered during parse phase on assembly meeting context %s: %s", meeting_id, e)
                 if not keep_xml:
                     fetcher.cleanup_file(xml_path)
                 continue
@@ -525,14 +532,13 @@ class SeneddPipeline:
             # Cleanup XML if requested
             if not keep_xml:
                 fetcher.cleanup_file(xml_path)
-                print(f"Cleaned up {xml_path}")
+                logger.info("Cleaned up working manifest cache payload: %s", xml_path)
             
-            print(f"✓ Meeting {meeting_id} processed")
-        
+            logger.info("Meeting %s fully committed to operational dimensions.", meeting_id)
         # Record checkpoint
         if files_processed > 0:
             with self.SessionLocal() as session:
                 with session.begin():
                     self.record_sync_checkpoint(session, files_processed, status="success")
         
-        print(f"\n✓ Incremental pipeline complete ({files_processed} meetings)")
+        logger.info("Incremental synchronization job execution finalized. Total synchronized sets: %d", files_processed)

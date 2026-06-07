@@ -132,7 +132,7 @@ class DataFetcher:
         save_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate filename: YYYYMMDD_MeetingID_Bilingual.xml
-        filename = f"{meeting.meeting_date.strftime('%Y%m%d')}_{meeting.meeting_id}_Bilingual.xml"
+        filename = f"{meeting.meeting_date.strftime('%Y%m%d')}_{meeting.meeting_type}_Bilingual.xml"
         file_path = save_dir / filename
         
         # Skip if already downloaded
