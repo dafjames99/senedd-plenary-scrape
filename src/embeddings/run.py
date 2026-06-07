@@ -12,4 +12,4 @@ from src.embeddings.providers import SentenceTransformersProvider, OllamaProvide
 pipeline = EmbeddingPipeline() # DEFAULT AS PER .env
 
 # Run an ingestion cycle
-pipeline.run(batch_size=50)
+pipeline.run(batch_size=200)
