@@ -6,14 +6,14 @@ from typing import Optional, List
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
 
-from src.db_schema import (
+from src.db.db_schema import (
     Base, Meeting, Member, MemberJobTitle, RawContribution, CleanContribution, 
     ClassifiedContribution, Speech, SpeechPart, ProceduralEvent, 
     RowTypeEnum, SyncCheckpoint, OralQuestion
 )
-from src.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
-from src.fetcher import DataFetcher
-from src.parser import parse_senedd_xml
+from src.db.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
+from src.db.fetcher import DataFetcher
+from src.db.parser import parse_senedd_xml
 import logging
 
 logger = logging.getLogger(__name__)
