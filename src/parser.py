@@ -28,11 +28,21 @@ def parse_senedd_xml(xml_file: Path) -> Tuple[Dict[str, Any], List[Dict[str, Any
         except:
             return None
 
+
+    #NOTE: Following block is predicated on download file name-convention.
+    #TODO: Custom error-handling to trace-back failures relating to download name-convention changes.
+    
+    name_split = xml_file.name.split('_') # Predicated on the filename being, e.g., "260602_Plenary_Bilingual.xml"
+    m_type = name_split[1].split('-')[0].strip().lower() # Remove " - xth Senedd" from "YYMMDD_Plenary - xth Senedd_Bilingual.xml" -> return "plenary"
+    if m_type == "plenary" and name_split[2] == "Votes": # "260602_Plenary_Votes.xml" - not a transcript
+        m_type = "plenary-votes"
+
     # Parse meeting details
     meeting_data = {
         'meeting_id': to_native(df.iloc[0]['Meeting_ID']),
         'assembly': to_native(df.iloc[0]['Assembly']),
         'meeting_date': to_datetime(df.iloc[0]['MeetingDate']),
+        'meeting_type': m_type
     }
     
     # Parse members details
