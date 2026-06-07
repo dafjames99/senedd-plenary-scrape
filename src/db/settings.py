@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Literal
 from typing_extensions import Self
 
@@ -6,13 +7,15 @@ from pydantic import Field, model_validator
 
 from src.embeddings.config import MODEL_METADATA_REGISTRY
 import logging
-# Explicitly defining allowed embedding backends via a Type Literal
+
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent
+ENV_PATH = ROOT_DIR / ".env"
 
 class Settings(BaseSettings):
     # --- Database Settings ---
     database_url: str = Field(
         default="sqlite:///./sqlite_database.db", 
-        alias="SQLITE_DATABASE_URL"
+        alias="DATABASE_URL"
     )
 
     # --- Core Embedding Strategy ---

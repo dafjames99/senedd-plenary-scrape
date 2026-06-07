@@ -8,9 +8,12 @@ dependencies = [
     "bs4>=0.0.2",
     "lxml>=6.1.1",
     "pandas>=3.0.3",
+    "pgvector>=0.4.2",
+    "psycopg2>=2.9.12",
     "pydantic-settings>=2.14.1",
     "requests>=2.34.2",
     "sqlalchemy>=2.0.50",
+    "sqlalchemy-utils>=0.42.1",
 ]
 
 [project.optional-dependencies]

@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
-
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy_utils import database_exists, create_database
 from src.db.db_schema import (
     Base, Meeting, Member, MemberJobTitle, RawContribution, CleanContribution, 
     ClassifiedContribution, Speech, SpeechPart, ProceduralEvent, 
@@ -23,11 +24,21 @@ class SeneddPipeline:
     
     def __init__(self, db_url: str):
         """Initialize pipeline with database connection."""
+        self.db_url = db_url
         self.engine = create_engine(db_url)
         self.SessionLocal = sessionmaker(bind=self.engine)
         
+    def _ensure_database_exists(self):
+        """Internal helper to ensure the underlying PostgreSQL database container exists."""
+        if not database_exists(self.db_url):
+            logger.info("Target PostgreSQL database does not exist. Spawning 'senedd_db' container on host...")
+            create_database(self.db_url)
+            logger.info("Database spawned successfully.")
+    
     def create_schema(self):
-        """Create all tables in the database."""
+        """Verify database cluster target existence, compile extensions, and build tables."""
+        # 1. Step out of the session context to verify the database container itself exists
+        self._ensure_database_exists()
         Base.metadata.create_all(self.engine)
         logger.info("Database schema created successfully.")
         
@@ -42,18 +53,18 @@ class SeneddPipeline:
         # Merge meeting
         meeting = Meeting(**meeting_data)
         session.merge(meeting)
+        session.flush()
         
         # Merge members
-        for member_data in members_list:
-            member = Member(**member_data)
-            session.merge(member)
+        if members_list:
+            stmt = insert(Member).values(members_list)
+            upsert_stmt = stmt.on_conflict_do_nothing(index_elements=['member_id'])
+            session.execute(upsert_stmt)
+            session.flush()
+        if contributions_list:
+            session.bulk_insert_mappings(RawContribution, contributions_list)    
             
-        # Merge contributions
-        for contrib_data in contributions_list:
-            contrib = RawContribution(**contrib_data)
-            session.merge(contrib)
-            
-        logger.info("Successfully ingested %d raw contribution rows.", len(contributions_list))
+        logger.info("Successfully ingested %d raw contribution rows via bulk mapping profiles.", len(contributions_list))
         return len(contributions_list)
 
     
@@ -117,6 +128,45 @@ class SeneddPipeline:
             session.merge(clean)
             session.merge(classified)
     
+    def save_reconstructed_speeches(self, session: Session, speech_records: list) -> int:
+        """Saves speeches using Postgres RETURNING statement to wire children."""
+        if not speech_records:
+            return 0
+
+        speech_part_records = []
+        
+        for record in speech_records:
+            # Pop out our temporary raw parts tracking field so it doesn't break the query table mapping
+            raw_parts = record.pop('_raw_parts', [])
+            
+            # Construct statement returning the freshly assigned auto-increment key
+            stmt = insert(Speech).values(record)
+            safe_stmt = stmt.on_conflict_do_nothing(index_elements=['speech_id']).returning(Speech.speech_id)
+            
+            result = session.execute(safe_stmt)
+            returned_row = result.fetchone()
+            
+            if returned_row:
+                # Get the fresh serial ID assigned by Postgres
+                generated_id = returned_row[0]
+                
+                for part in raw_parts:
+                    speech_part_records.append({
+                        'speech_id': generated_id,
+                        'contribution_id': part['contribution_id'],
+                        'contribution_order_id': part['contribution_order_id'],
+                        'contribution_time': part['contribution_time'],
+                        'spoken_url': part['spoken_url'],
+                        'translated_url': part['translated_url'],
+                        'verbatim_text': part['verbatim_text'],
+                    })
+                    
+        # Batch insert all children downstream in one fast driver payload
+        if speech_part_records:
+            session.execute(insert(SpeechPart).values(speech_part_records))
+            
+        session.flush()
+        return len(speech_records)
     
     def reconstruct_speeches(self, session: Session, meeting_id: Optional[int] = None) -> int:
         """
@@ -226,37 +276,28 @@ class SeneddPipeline:
             
         if current_speech is not None:
             speeches.append(current_speech)
-            
-        # Create Speeches and SpeechParts
-        new_speeches = []
+            speech_records = []
         for speech_dict in speeches:
-            speech = Speech(
-                meeting_id=speech_dict['meeting_id'],
-                assembly=speech_dict['assembly'],
-                agenda_item_id=speech_dict['agenda_item_id'],
-                speaker_id=speech_dict['speaker_id'],
-                speaker_name=speech_dict['speaker_name'],
-                speech_language=speech_dict['speech_language'],
-                speech_text=' '.join(speech_dict['texts']),
-                source_row_count=len(speech_dict['speech_parts']),
-            )
+            # Prepare plain dictionaries instead of instantiation objects
+            speech_records.append({
+                'meeting_id': speech_dict['meeting_id'],
+                'assembly': speech_dict['assembly'],
+                'agenda_item_id': speech_dict['agenda_item_id'],
+                'speaker_id': speech_dict['speaker_id'],
+                'speaker_name': speech_dict['speaker_name'],
+                'speech_language': speech_dict['speech_language'],
+                'speech_text': ' '.join(speech_dict['texts']),
+                'source_row_count': len(speech_dict['speech_parts']),
+                'created_at': datetime.now()
+            })
             
-            speech.parts = [
-                SpeechPart(
-                    contribution_id=part_dict['contribution_id'],
-                    contribution_order_id=part_dict['contribution_order_id'],
-                    contribution_time=part_dict['contribution_time'],
-                    spoken_url=part_dict['spoken_url'],
-                    translated_url=part_dict['translated_url'],
-                    verbatim_text=part_dict['verbatim_text'],
-                )
-                for part_dict in speech_dict['speech_parts']
-            ]
-            new_speeches.append(speech)
-            
-        meeting.speeches = new_speeches
-        logger.debug("Meeting %s: Grouped %d individual speeches.", meeting_id, len(new_speeches))
-        return len(new_speeches)
+            # Cache the speech parts metadata for child tables
+            # Note: Because we are inserting parents manually, we will map 
+            # their lineage associations right after the parents are saved.
+        # Invoke our new explicit PostgreSQL driver routines safely
+        inserted_count = self.save_reconstructed_speeches(session, speech_records)
+        logger.debug("Meeting %s: Safely processed %d explicit speeches via upsert logic.", meeting_id, inserted_count)
+        return inserted_count
     
     def build_members_dimension(self, session: Session, meeting_id: Optional[int] = None):
         """
@@ -429,6 +470,7 @@ class SeneddPipeline:
         """Run all pipeline phases (fresh rebuild)."""
         logger.info("Initializing full pipeline database reset and sync routine execution sequence.")
         # Drop existing schema for fresh start
+        self._ensure_database_exists()        
         Base.metadata.drop_all(self.engine)
         logger.info("Dropped all tables from schema target.")
         

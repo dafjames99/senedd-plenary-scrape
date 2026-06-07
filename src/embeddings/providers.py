@@ -33,11 +33,8 @@ class OllamaProvider(BaseEmbeddingProvider):
         
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         # Ollama handles batches sequentially or natively depending on the model/server config
-        results = []
-        for text in tqdm(texts, "Embedding texts ...", total = len(texts)):
-            response = self.client.embed(model=self._model_name, input=text)
-            results.append(response['embeddings'])
-        return results
+        response = self.client.embed(model=self._model_name, input=texts)
+        return response['embeddings']
 
 
 class OpenAiProvider(BaseEmbeddingProvider):

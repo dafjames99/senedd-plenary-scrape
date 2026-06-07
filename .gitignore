@@ -33,3 +33,4 @@ data/*.xml
 Thumbs.db
 
 todo.md
+prompt*.md
