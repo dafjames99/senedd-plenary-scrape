@@ -1,7 +1,9 @@
 """SQLAlchemy models for Senedd speech pipeline."""
-from sqlalchemy import Column, String, Integer, Text, DateTime, Float, ForeignKey, Enum, UniqueConstraint
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
+
 from datetime import datetime
 import enum
 
@@ -235,7 +237,7 @@ class SpeechEmbedding(Base):
     speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=False)
     chunk_index = Column(Integer)
     chunk_text = Column(Text)
-    embedding_vector = Column(Text)  # JSON serialized float array
+    embedding_vector = Column(Vector)
     model_name = Column(String(100))
     created_at = Column(DateTime, default=datetime.now)
 
@@ -253,3 +255,8 @@ class SyncCheckpoint(Base):
     status = Column(String(50))  # success, partial, error
     notes = Column(Text)  # Optional notes
     created_at = Column(DateTime, default=datetime.utcnow)
+
+# Critical lifecycle hook: Automatically ensure pgvector extension is initialized in Postgres
+@event.listens_for(Base.metadata, "before_create")
+def receive_before_create(target, connection, **kw):
+    connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))

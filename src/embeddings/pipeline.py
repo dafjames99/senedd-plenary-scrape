@@ -103,7 +103,7 @@ class EmbeddingPipeline:
                     speech_id=meta["speech_id"],
                     chunk_index=meta["chunk_index"],
                     chunk_text=meta["chunk_text"],
-                    embedding_vector=json.dumps(vector),  # Serialized JSON array string for SQLite
+                    embedding_vector=vector,
                     model_name=self.provider.model_name,
                     created_at=datetime.now()
                 )
