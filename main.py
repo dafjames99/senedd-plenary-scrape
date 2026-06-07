@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
-from src import SeneddPipeline, settings, setup_logging, EmbeddingPipeline
+from src import EmbeddingPipeline, SeneddPipeline, setup_logging, settings
 
 logger = logging.getLogger("orchestrator")
 

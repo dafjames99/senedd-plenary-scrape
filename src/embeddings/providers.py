@@ -1,7 +1,7 @@
 from tqdm import tqdm
 from typing import List
 from .base import BaseEmbeddingProvider
-from src.settings import settings
+from src.db.settings import settings
 class SentenceTransformersProvider(BaseEmbeddingProvider):
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         # Deferred import so you don't need torch/sentence-transformers installed to run other providers

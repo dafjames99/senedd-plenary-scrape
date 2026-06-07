@@ -5,10 +5,10 @@ from sqlalchemy import select, create_engine
 from sqlalchemy.orm import sessionmaker, Session
 from typing import List
 
-from src.db_schema import (
+from src.db.db_schema import (
     Speech, SpeechEmbedding
 )
-from src.settings import settings
+from src.db.settings import settings
 from .base import BaseEmbeddingProvider
 from .chunker import chunk_text
 from .providers import PROVIDER_REGISTER
