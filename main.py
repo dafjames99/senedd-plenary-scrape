@@ -71,7 +71,7 @@ def main():
         help="Pipeline mode: 'sync' (incremental processing run) or 'embed-only' (process embeddings)"
     )
     parser.add_argument(
-        "--force",
+        '-f', "--force",
         action="store_true",
         help="Force a complete database teardown and full rebuild from the source files."
     )

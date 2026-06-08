@@ -17,7 +17,7 @@ class Meeting(Base):
     meeting_id = Column(Integer, primary_key=True)
     assembly = Column(Integer, nullable=False)
     meeting_date = Column(DateTime, nullable=False)
-    meeting_type = Column(String(50))
+    meeting_type = Column(String(100))
 
     contributions = relationship("RawContribution", back_populates="meeting", cascade="all, delete-orphan")
     speeches = relationship("Speech", back_populates="meeting", cascade="all, delete-orphan")

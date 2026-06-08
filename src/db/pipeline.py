@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy_utils import database_exists, create_database
@@ -62,7 +62,10 @@ class SeneddPipeline:
             session.execute(upsert_stmt)
             session.flush()
         if contributions_list:
-            session.bulk_insert_mappings(RawContribution, contributions_list)    
+            stmt = insert(RawContribution).values(contributions_list)
+            upsert_stmt = stmt.on_conflict_do_nothing(index_elements=['contribution_id'])
+            session.execute(upsert_stmt)
+            session.flush()
             
         logger.info("Successfully ingested %d raw contribution rows via bulk mapping profiles.", len(contributions_list))
         return len(contributions_list)
@@ -81,6 +84,10 @@ class SeneddPipeline:
         raw_contribs = query.all()
         
         logger.debug("Found %d raw rows available for pipeline transformation workflows.", len(raw_contribs))
+        
+        oral_questions_batch = []
+        clean_contributions_batch = []
+        classified_contributions_batch = []
         
         for raw in raw_contribs:
 
@@ -106,27 +113,51 @@ class SeneddPipeline:
                         _, _, clean_trans_text = parse_oral_question_meta(cleaned_translated)
                         cleaned_translated = clean_trans_text
                     
-                    oral_q = OralQuestion(
-                        question_id=q_id,
-                        meeting_id=raw.meeting_id,
-                        contribution_id=raw.contribution_id,
-                        question_number=q_num,
-                    )
-                    session.merge(oral_q)
+                    # oral_q = OralQuestion(
+                    #     question_id=q_id,
+                    #     meeting_id=raw.meeting_id,
+                    #     contribution_id=raw.contribution_id,
+                    #     question_number=q_num,
+                    # )
+                    # session.merge(oral_q)
+                    oral_questions_batch.append({
+                        "question_id": q_id,
+                        "meeting_id": raw.meeting_id,
+                        "contribution_id": raw.contribution_id,
+                        "question_number": q_num,
+                    })
 
-            clean = CleanContribution(
-                contribution_id=raw.contribution_id,
-                contribution_verbatim_clean=cleaned_verbatim,
-                contribution_translated_clean=cleaned_translated,
-            )
-            classified = ClassifiedContribution(
-                contribution_id=raw.contribution_id,
-                row_type=RowTypeEnum(row_type),
-                classification_reason=reason,
-            )
+            # clean = CleanContribution(
+            #     contribution_id=raw.contribution_id,
+            #     contribution_verbatim_clean=cleaned_verbatim,
+            #     contribution_translated_clean=cleaned_translated,
+            # )
+            # classified = ClassifiedContribution(
+            #     contribution_id=raw.contribution_id,
+            #     row_type=RowTypeEnum(row_type),
+            #     classification_reason=reason,
+            # )
             
-            session.merge(clean)
-            session.merge(classified)
+            # session.merge(clean)
+            # session.merge(classified)
+            clean_contributions_batch.append({
+                "contribution_id": raw.contribution_id,
+                "contribution_verbatim_clean": cleaned_verbatim,
+                "contribution_translated_clean": cleaned_translated,
+            })
+            classified_contributions_batch.append({
+                "contribution_id": raw.contribution_id,
+                "row_type": RowTypeEnum(row_type),
+                "classification_reason": reason,
+            })
+            if oral_questions_batch:
+                session.execute(insert(OralQuestion).values(oral_questions_batch).on_conflict_do_nothing(index_elements=['question_id']))
+            if clean_contributions_batch:
+                session.execute(insert(CleanContribution).values(clean_contributions_batch).on_conflict_do_nothing(index_elements=['contribution_id']))
+            if classified_contributions_batch:
+                session.execute(insert(ClassifiedContribution).values(classified_contributions_batch).on_conflict_do_nothing(index_elements=['contribution_id']))
+                
+            session.flush()
     
     def save_reconstructed_speeches(self, session: Session, speech_records: list) -> int:
         """Saves speeches using Postgres RETURNING statement to wire children."""
@@ -276,7 +307,8 @@ class SeneddPipeline:
             
         if current_speech is not None:
             speeches.append(current_speech)
-            speech_records = []
+        
+        speech_records = []
         for speech_dict in speeches:
             # Prepare plain dictionaries instead of instantiation objects
             speech_records.append({
@@ -300,54 +332,58 @@ class SeneddPipeline:
         return inserted_count
     
     def build_members_dimension(self, session: Session, meeting_id: Optional[int] = None):
-        """
-        Phase 5a: Build/complete members dimension table.
-        """
+        """Phase 5a: Build/complete members dimension table."""
         logger.info("Phase 5a: Compiling members dimension constraints for meeting_id=%s", meeting_id)
-        query = session.query(RawContribution).filter(
-            RawContribution.member_id.isnot(None)
-        )
+        query = session.query(RawContribution).filter(RawContribution.member_id.isnot(None))
         if meeting_id:
             query = query.filter(RawContribution.meeting_id == meeting_id)
         raw_rows = query.all()
 
+        unique_members = {}
+        unique_job_titles = {}
+
         for raw in raw_rows:
-            member = (
-                session.query(Member)
-                .filter_by(member_id=raw.member_id)
-                .first()
-            )
+            # Safely group profile info by member_id.
+            # Using raw.member_name_english guarantees the name field is populated.
+            unique_members[raw.member_id] = {
+                "member_id": raw.member_id,
+                "name_english": raw.member_name_english or "Unknown Speaker",
+                "biography_english": raw.member_biog_english,
+                "biography_welsh": raw.member_biog_welsh,
+                "sort_code": raw.member_sortcode
+            }
 
-            if member:
-                if not member.biography_english:
-                    member.biography_english = raw.member_biog_english
-                if not member.biography_welsh:
-                    member.biography_welsh = raw.member_biog_welsh
-                if not member.sort_code:
-                    member.sort_code = raw.member_sortcode
+            # Safely group unique job title changes for this specific meeting
+            unique_job_titles[(raw.member_id, raw.meeting_id)] = {
+                "member_id": raw.member_id,
+                "meeting_id": raw.meeting_id,
+                "job_title_english": raw.member_job_title_english,
+                "job_title_welsh": raw.member_job_title_welsh,
+            }
 
-            existing_title = (
-                session.query(MemberJobTitle)
-                .filter_by(
-                    member_id=raw.member_id,
-                    meeting_id=raw.meeting_id
-                )
-                .first()
-            )
+        # Issue updates on completely unique lists
+        if unique_members:
+            stmt = insert(Member).values(list(unique_members.values()))
+            session.execute(stmt.on_conflict_do_update(
+                index_elements=['member_id'],
+                set_={
+                    'biography_english': stmt.excluded.biography_english,
+                    'biography_welsh': stmt.excluded.biography_welsh,
+                    'sort_code': stmt.excluded.sort_code
+                }
+            ))
 
-            if existing_title:
-                existing_title.job_title_english = raw.member_job_title_english
-                existing_title.job_title_welsh = raw.member_job_title_welsh
-            else:
-                session.add(
-                    MemberJobTitle(
-                        member_id=raw.member_id,
-                        meeting_id=raw.meeting_id,
-                        job_title_english=raw.member_job_title_english,
-                        job_title_welsh=raw.member_job_title_welsh,
-                    )
-                )
+        if unique_job_titles:
+            stmt = insert(MemberJobTitle).values(list(unique_job_titles.values()))
+            session.execute(stmt.on_conflict_do_update(
+                index_elements=['member_id', 'meeting_id'],
+                set_={
+                    'job_title_english': stmt.excluded.job_title_english,
+                    'job_title_welsh': stmt.excluded.job_title_welsh
+                }
+            ))
 
+        session.flush()
         member_count = session.query(Member).count()
         title_count = session.query(MemberJobTitle).count()
         logger.info("Dimension builds complete. Registry metrics -> Unique Members: %d | Roles Matrix Entries: %d", member_count, title_count)
@@ -381,25 +417,27 @@ class SeneddPipeline:
             .filter(ClassifiedContribution.row_type == RowTypeEnum.PROCEDURAL)
             .all()
         )
-        
-        new_events = []
+        unique_events = {}
         for raw in procedural_rows:
             event_type = 'ruling' if raw.member_job_title_english and 'Llywydd' in raw.member_job_title_english else raw.contribution_type
             
-            event = ProceduralEvent(
-                meeting_id=meeting_id,
-                agenda_item_id=raw.agenda_item_id,
-                event_time=raw.contribution_time,
-                event_type=event_type,
-                speaker_name=raw.member_name_english or 'Unknown',
-                raw_text=raw.contribution_verbatim or raw.contribution_translated,
-                source_contribution_id=raw.contribution_id,
-                senedd_tv_url=raw.contribution_spoken_seneddtv,
-            )
-            new_events.append(event)
+            unique_events[raw.contribution_id] = {
+                "meeting_id": meeting_id,
+                "agenda_item_id": raw.agenda_item_id,
+                "event_time": raw.contribution_time,
+                "event_type": event_type,
+                "speaker_name": raw.member_name_english or 'Unknown',
+                "raw_text": raw.contribution_verbatim or raw.contribution_translated,
+                "source_contribution_id": raw.contribution_id,
+                "senedd_tv_url": raw.contribution_spoken_seneddtv,
+            }
             
-        meeting.procedural_events = new_events
-        return len(new_events)
+        # Execute a direct, safe batch insert without forcing an ON CONFLICT check on unindexed columns
+        if unique_events:
+            stmt = insert(ProceduralEvent).values(list(unique_events.values()))
+            session.execute(stmt)
+            session.flush()
+        return len(unique_events)
     
     def validate_pipeline(self) -> dict:
         """
