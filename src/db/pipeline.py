@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
+from typing import Literal, Optional, List
 from sqlalchemy import create_engine, text, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import insert
@@ -550,15 +550,58 @@ class SeneddPipeline:
             notes=notes
         )
         session.add(checkpoint)
-    
-    def run_incremental(self, data_dir: Path = None, keep_xml: bool = False, last_sync_date: Optional[datetime] = None):
+        
+    def process_single_meeting(self, meeting: Meeting, data_dir: Path, keep_xml: bool) -> bool:
         """
-        Run incremental pipeline: fetch → parse → transform → upsert.
+        Core pipeline execution block for an isolated meeting instance.
+        Returns True if fully processed and committed, False otherwise.
+        """
+        meeting_id = int(meeting.meeting_id)
+        logger.info("Starting targeted extraction process loop on Meeting ID context scope: %s", meeting_id)
+        
+        fetcher = DataFetcher()
+        xml_path = fetcher.download_file(meeting, data_dir)
+        if not xml_path or not xml_path.exists():
+            logger.error("HTTP Fetch Error: Download payload validation failed for meeting resource: %s. Skipping target entry.", meeting_id)
+            return False
+        
+        try:
+            # Ingest XML inside its own transaction
+            with self.SessionLocal() as session:
+                with session.begin():
+                    self.ingest_xml(session, xml_path)
+            
+            # Transform the meeting atomically inside its own transaction
+            with self.SessionLocal() as session:
+                with session.begin():
+                    self.process_meetings(session, [meeting_id])
+            
+            success = True
+        except Exception as e:
+            logger.exception("Pipeline Engine Failure: Fatal exception encountered during parse phase on assembly meeting context %s: %s", meeting_id, e)
+            success = False
+        finally:
+            # Cleanup XML if requested
+            if not keep_xml and xml_path and xml_path.exists():
+                fetcher.cleanup_file(xml_path)
+                logger.info("Cleaned up working manifest cache payload: %s", xml_path)
+                
+        if success:
+            logger.info("Meeting %s fully committed to operational dimensions.", meeting_id)
+        return success
+
+    def run_incremental(
+        self, 
+        data_dir: Optional[Path] = None, 
+        keep_xml: bool = False, 
+        last_sync_date: Optional[datetime] = None, 
+        transcript_type: Literal["BilingualTranscript", "WelshTranscript", "EnglishTranscript", "Votes", "QNR"] = "BilingualTranscript"
+    ):
+        """
+        Run incremental pipeline: automatically detect changes since last sync date and execute.
         """
         logger.info("Initializing scheduled incremental compilation workflow task.")
-        
-        if data_dir is None:
-            data_dir = Path("data")
+        data_dir = data_dir or Path("data")
         data_dir.mkdir(exist_ok=True)
         
         self.create_schema()
@@ -570,51 +613,20 @@ class SeneddPipeline:
                 last_sync_date = self.get_last_sync_date(session)
             logger.info("Scanning index registry for plenary meetings uploaded since target timestamp: %s", last_sync_date.date())
             
-        # Detect and download new meetings
-        new_meetings = fetcher.check_for_updates(last_sync_date)
+        # Detect new meetings
+        new_meetings = fetcher.check_for_updates(last_sync_date, transcript_type)
         if not new_meetings:
             logger.info("No incremental updates found on remote Senedd feeds. Hibernating.")
             return
         
         logger.info("Discovered %d new plenary session transcripts requiring transformation processing.", len(new_meetings))
         
-        # Process each meeting
+        # Dispatch to the worker method
         files_processed = 0
         for meeting in new_meetings:
-            meeting_id = int(meeting.meeting_id)
-            logger.info("Starting targeted extraction process loop on Meeting ID context scope: %s", meeting_id)
-            
-            # Download XML
-            xml_path = fetcher.download_file(meeting, data_dir)
-            if not xml_path or not xml_path.exists():
-                logger.error("HTTP Fetch Error: Download payload validation failed for meeting resource: %s. Skipping target entry.", meeting_id)
-                continue
-            
-            try:
-                # Ingest XML inside its own transaction
-                with self.SessionLocal() as session:
-                    with session.begin():
-                        self.ingest_xml(session, xml_path)
-                
-                # Transform the meeting atomically inside its own transaction
-                with self.SessionLocal() as session:
-                    with session.begin():
-                        self.process_meetings(session, [meeting_id])
-                
+            if self.process_single_meeting(meeting, data_dir, keep_xml):
                 files_processed += 1
                 
-            except Exception as e:
-                logger.exception("Pipeline Engine Failure: Fatal exception encountered during parse phase on assembly meeting context %s: %s", meeting_id, e)
-                if not keep_xml:
-                    fetcher.cleanup_file(xml_path)
-                continue
-            
-            # Cleanup XML if requested
-            if not keep_xml:
-                fetcher.cleanup_file(xml_path)
-                logger.info("Cleaned up working manifest cache payload: %s", xml_path)
-            
-            logger.info("Meeting %s fully committed to operational dimensions.", meeting_id)
         # Record checkpoint
         if files_processed > 0:
             with self.SessionLocal() as session:
@@ -622,3 +634,27 @@ class SeneddPipeline:
                     self.record_sync_checkpoint(session, files_processed, status="success")
         
         logger.info("Incremental synchronization job execution finalized. Total synchronized sets: %d", files_processed)
+
+    def run_for_meetings(
+        self, 
+        meetings: List[Meeting], 
+        data_dir: Optional[Path] = None, 
+        keep_xml: bool = False
+    ) -> int:
+        """
+        Bypass entry point: Force execution on an explicit list of Meeting objects.
+        Perfect for streaming direct results straight out of a backfill fetcher cycle.
+        """
+        logger.info("Initializing targeted bypass compilation task for %d specific entities.", len(meetings))
+        data_dir = data_dir or Path("data")
+        data_dir.mkdir(exist_ok=True)
+        
+        self.create_schema()
+        
+        files_processed = 0
+        for meeting in meetings:
+            if self.process_single_meeting(meeting, data_dir, keep_xml):
+                files_processed += 1
+                
+        logger.info("Targeted manual execution processing complete. Ingested profiles: %d", files_processed)
+        return files_processed

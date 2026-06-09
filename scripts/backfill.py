@@ -1,99 +1,167 @@
+"""Unified script to harvest, cache, and ingest historical Senedd transcript references."""
 import argparse
+import sys
 import time
+import logging
 from datetime import datetime, timedelta
-from typing_extensions import final
-import requests
-from bs4 import BeautifulSoup
 from pathlib import Path
 import pandas as pd
 
-ROOT_DIR = Path(__file__).parent.parent
-DATA_DIR = ROOT_DIR / "data"
+# Automatically resolve root path boundaries for module resolution
+ROOT_DIR = Path(__file__).resolve().parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
-def generate_backfill_urls(start_date_str: str, end_date_str: str):
-    """
-    Iterates day-by-day between dates to extract direct XML links,
-    completely bypassing the UI truncation cap.
-    """
+from src import setup_logging, settings
+from src.db.fetcher import DataFetcher, Meeting
+from src.db.pipeline import SeneddPipeline
+
+logger = logging.getLogger(__name__)
+
+BACKFILL_DIR = ROOT_DIR / "data" / "backfill_links"
+BACKFILL_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def harvest_backfill_meetings(start_date_str: str, end_date_str: str, transcript_type: str) -> list[Meeting]:
+    """STAGE 1: Safely step day-by-day and return parsed meeting objects."""
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
     end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
     
-    url = "https://record.senedd.wales/XMLExport"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    
+    fetcher = DataFetcher()
     current_date = start_date
-    all_discovered_links = []
+    all_meetings = []
     
-    print(f"[*] Commencing single-day window harvest from {start_date_str} to {end_date_str}...")
+    logger.info(f"[*] Commencing single-day harvest window from {start_date_str} to {end_date_str}...")
     
     while current_date <= end_date:
-        date_iso = current_date.strftime("%Y-%m-%d")
-        date_next_iso = (current_date + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        # Structure payload to match form inputs for a single day
-        form_payload = {
-            "FromDate": date_iso,
-            "ToDate": date_iso,
-            "Submission": "Search"
-        }
-        
+        date_str = current_date.strftime("%Y-%m-%d")
         try:
-            # Issue the POST request to get the data table for just this day
-            final_url = f"{url}/?start={date_iso}&end={date_next_iso}"
-            # print(f"[*] Querying for {final_url}...")
-            response = requests.get(final_url, headers=headers)
-            response.raise_for_status()
+            # Shift end_date to current + 1 day to encapsulate the daily threshold perfectly
+            html = fetcher.get_html_page(start_date=current_date, end_date=current_date + timedelta(days=1))
+            meetings_on_day = fetcher.parse_meetings_from_html(html, transcript_type=transcript_type)
             
-            soup = BeautifulSoup(response.text, 'html.parser')
-            table = soup.find('table')
-            
-            # If a table exists, it means a plenary meeting was held on this day
-            if table:
-                # Find all table row cells containing download paths
-                links_in_row = table.find_all('a', href=True)
+            if meetings_on_day:
+                logger.info(f"[+] Found {len(meetings_on_day)} tracking items on {date_str}")
+                all_meetings.extend(meetings_on_day)
+            else:
+                logger.debug(f"[-] No valid '{transcript_type}' matches found on {date_str}")
                 
-                day_links = []
-                for a in links_in_row:
-                    href = a['href']
-                    # Isolate direct transcript download pathways
-                    if "/XMLExport/Download" in href:
-                        full_link = f"https://record.senedd.wales{href}"
-                        day_links.append(full_link)
-                
-                if day_links:
-                    print(f"[+] Found {len(day_links)} links on {date_iso}")
-                    all_discovered_links.extend(day_links)
-                else:
-                    print(f"[-] No transcript links found on {date_iso}")
         except Exception as e:
-            print(f"[!] Network or parsing error encountered on {date_iso}: {e}")
+            logger.error(f"[!] Processing exception hit on checkpoint window {date_str}: {e}")
             
-        # Respectful trailing throttle to avoid hammering the Senedd web application gateway
-        print("sleep")
         time.sleep(0.5)
         current_date += timedelta(days=1)
         
-    print("\n" + "="*50)
-    print(f"[#] Extraction Cycle Concluded. Harvested {len(all_discovered_links)} total links.")
-    print("="*50)
-    
-    # Print the links list so you can copy/pipe it as a seed source
-    for link in all_discovered_links:
-        print(link)
+    logger.info(f"[#] Harvest cycle completed. Discovered {len(all_meetings)} total meetings.")
+    return all_meetings
+
+
+def save_to_csv(meetings: list[Meeting], csv_path: Path):
+    """Utility to turn meeting memory models into a persistent data checkpoint file."""
+    data = [
+        {
+            "meeting_id": m.meeting_id,
+            "meeting_date": m.meeting_date,
+            "meeting_type": m.meeting_type,
+            "download_url": m.download_url  # Fixed: changed from meeting_url to match your schema
+        } 
+        for m in meetings
+    ]
+    df = pd.DataFrame(data)
+    df.to_csv(csv_path, index=False)
+    logger.info(f"[✓] Backfill catalog cache saved successfully -> {csv_path}")
+
+
+def load_from_csv(csv_path: Path) -> list[Meeting]:
+    """Utility to reconstitute structural Meeting instances back out of a CSV matrix file."""
+    if not csv_path.exists():
+        logger.error(f"[!] Target file reference missing: {csv_path}")
+        return []
         
-    return all_discovered_links
+    df = pd.read_csv(csv_path)
+    meetings = []
+    for _, row in df.iterrows():
+        # Handle parsed timestamps safely out of string representations
+        m_date = pd.to_datetime(row["meeting_date"])
+        meetings.append(Meeting(
+            meeting_id=str(row["meeting_id"]),
+            meeting_date=m_date,
+            meeting_type=str(row["meeting_type"]),
+            download_url=str(row["download_url"])
+        ))
+    return meetings
+
+
+def ingest_meetings_to_db(meetings: list[Meeting]) -> bool:
+    """STAGE 2: Process direct XML compilation down through the database pipeline layers."""
+    if not meetings:
+        logger.warning("[!] Ingestion task received an empty list of meetings. Halting execution.")
+        return False
+        
+    logger.info(f"[*] Initializing pipeline database sync for {len(meetings)} meetings...")
+    try:
+        pipeline = SeneddPipeline(settings.database_url)
+        pipeline.run_for_meetings(meetings, keep_xml=False)
+        return True
+    except Exception as e:
+        logger.error(f"[!] Fatal pipeline break encountered during backfill migration: {e}")
+        return False
+
 
 if __name__ == "__main__":
-
-    parser = argparse.ArgumentParser(description="Backfill URL Harvester for Senedd Plenary Transcripts")
-    parser.add_argument("--start", type=str, required=False, default="2025-01-01", help="Start date for backfill in YYYY-MM-DD format")
-    parser.add_argument("--end", type=str, required=False, default="2025-06-01", help="End date for backfill in YYYY-MM-DD format")
+    setup_logging()
+    
+    parser = argparse.ArgumentParser(description="Unified Senedd Pipeline Backfill Management Utility")
+    parser.add_argument("--start", type=str, required=True, help="Start date in YYYY-MM-DD")
+    parser.add_argument("--end", type=str, required=False, default=datetime.now().strftime("%Y-%m-%d"), help="End date in YYYY-MM-DD. Defaults to today.")
+    parser.add_argument(
+        "--type", 
+        type=str, 
+        required=False, 
+        default="BilingualTranscript",
+        choices=["BilingualTranscript", "WelshTranscript", "EnglishTranscript", "Votes", "QNR"],
+        help="Target transcript variant filter matrix template."
+    )
+    parser.add_argument(
+        "--action",
+        type=str,
+        required=False,
+        default="all",
+        choices=["harvest", "ingest", "all"],
+        help="Execution target: 'harvest' maps web to CSV, 'ingest' saves CSV to DB, 'all' runs sequential end-to-end processing."
+    )
+    parser.add_argument(
+        "--cleanup_csv",
+        action="store_true",
+        help="If set, will delete the intermediate CSV file after successful end-to-end processing."
+    )
     args = parser.parse_args()
+
+    # Pre-calculate predictable file storage paths
+    target_csv = BACKFILL_DIR / f"{args.type}_{args.start}_to_{args.end}.csv"
     
-    all_discovered_links = generate_backfill_urls(args.start, args.end)
-    pd.DataFrame(all_discovered_links, columns=["URL"]).to_csv(DATA_DIR / "backfill_links.csv", index=False)
-    # CURRENT FILE STATE: --start 2026-02-01 --end 2026-06-05
-    
-    
+    # Execution Routing Matrix
+    if args.action == "harvest":
+        # Only run web extraction and save file
+        discovered = harvest_backfill_meetings(args.start, args.end, args.type)
+        if discovered:
+            save_to_csv(discovered, target_csv)
+            
+    elif args.action == "ingest":
+        # Only read existing file and parse database changes
+        logger.info(f"[*] Loading targets from static cache: {target_csv.name}")
+        staged_meetings = load_from_csv(target_csv)
+        success = ingest_meetings_to_db(staged_meetings)
+        if success and args.cleanup_csv:
+                target_csv.unlink()
+
+    elif args.action == "all":
+        # Run end-to-end: Scan -> Cache -> Process Database Transactions
+        discovered = harvest_backfill_meetings(args.start, args.end, args.type)
+        if discovered:
+            save_to_csv(discovered, target_csv)
+            success = ingest_meetings_to_db(discovered)
+            if success and args.cleanup_csv:
+                target_csv.unlink()
+        else:
+            logger.info("[!] No operational targets detected inside window range constraints.")
