@@ -657,3 +657,48 @@ class SeneddPipeline:
                 
         logger.info("Targeted manual execution processing complete. Ingested profiles: %d", files_processed)
         return files_processed
+    
+    def reprocess_downstream_from_raw(self, clear_dimensions: bool = True, clear_embeddings: bool = False):
+        """Bypasses network operations. 
+        Uses a native SQL procedure to drop dirty downstream tables, then leverages 
+        local Python logic to recalculate speech boundaries and text transformations.
+        """
+        logger.info("Initializing downstream reprocessing workflow from local RAW cache context.")
+        
+        # STAGE 1: Let Postgres handle the heavy lifting of wiping old data safely
+        with self.SessionLocal() as session:
+            with session.begin():
+                logger.info("Calling database-native purge procedure...")
+                try:
+                    session.execute(
+                        text("CALL purge_downstream_tables(:clear_dims, :clear_embs);"),
+                        {"clear_dims": clear_dimensions, "clear_embs": clear_embeddings}
+                    )
+                except Exception as e:
+                    logger.exception("Failed to execute native purge procedure. Aborting reprocessing sequence: %s", e)
+                    return
+        with self.SessionLocal() as session:
+            meeting_ids = [
+                m[0] for m in session.query(RawContribution.meeting_id)
+                .distinct()
+                .order_by(RawContribution.meeting_id)
+                .all()
+            ]
+        if not meeting_ids:
+            logger.warning("[!] No raw data found in `raw_contributions`. Reprocessing halted.")
+            return
+            
+        logger.info(f"[+] Identified {len(meeting_ids)} distinct meetings ready for local rebuilding.")
+
+        for i, m_id in enumerate(meeting_ids, 1):
+            logger.info(f"[*] [{i}/{len(meeting_ids)}] Processing local rebuild for meeting ID: {m_id}")
+            try:
+                with self.SessionLocal() as session:
+                    with session.begin():
+                        self.process_meetings(session, [m_id])
+            except Exception as e:
+                logger.error(f"[!] Compilation failed on local meeting checkpoint context {m_id}: {e}")
+                continue
+                
+        self.validate_pipeline()
+        logger.info("[✓] Downstream transformation reconstruction finalized successfully.")

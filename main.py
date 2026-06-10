@@ -66,9 +66,9 @@ def main():
     )
     parser.add_argument(
         "--mode",
-        choices=["sync", "embed-only"], # Simplified to sync vs metadata maintenance
+        choices=["sync", "embed-only", "reprocess"], # Simplified to sync vs metadata maintenance
         default="sync",
-        help="Pipeline mode: 'sync' (incremental processing run) or 'embed-only' (process embeddings)"
+        help="Pipeline mode: 'sync' (incremental processing run);'embed-only' (process embeddings); reprocess (downstream reprocessing from existing raw_contributions)"
     )
     parser.add_argument(
         '-f', "--force",
@@ -116,7 +116,9 @@ def main():
     # Initialize pipeline
     pipeline = SeneddPipeline(DB_URL)
     
-    if args.mode == "sync":
+    if args.mode == "reprocess":
+        pipeline.reprocess_downstream_from_raw(clear_dimensions=False, clear_embeddings=False)
+    elif args.mode == "sync":
         if args.force:
             logger.warning("!!! FORCE REBUILD ACTIVATED !!! Executing structural teardown...")
             if not args.xml_file.exists():
