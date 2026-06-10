@@ -144,6 +144,7 @@ class RowTypeEnum(enum.Enum):
     PROCEDURAL = "procedural"
     NOISE = "noise"
     ORAL_QUESTION = "oral-question"
+    TOPICAL_QUESTION = "topical-question"
 
 
 class ClassifiedContribution(Base):
@@ -163,7 +164,7 @@ class OralQuestion(Base):
     """
     __tablename__ = "oral_questions"
 
-    question_id = Column(String(50), primary_key=True) # e.g., 'OQ64075'
+    question_id = Column(String(50), primary_key=True) # e.g., 'OQ64075' or 'TQ1234'
     meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
     contribution_id = Column(Integer, ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"), nullable=False, unique=True)
     
@@ -254,7 +255,7 @@ class SyncCheckpoint(Base):
     file_count = Column(Integer)  # Files processed in this sync
     status = Column(String(50))  # success, partial, error
     notes = Column(Text)  # Optional notes
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.now)
 
 # Critical lifecycle hook: Automatically ensure pgvector extension is initialized in Postgres
 @event.listens_for(Base.metadata, "before_create")

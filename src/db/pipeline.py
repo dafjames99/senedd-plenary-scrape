@@ -120,7 +120,7 @@ class SeneddPipeline:
             cleaned_verbatim = clean_contribution_verbatim(raw.contribution_verbatim)
             cleaned_translated = clean_contribution_verbatim(raw.contribution_translated)
 
-            if row_type == "oral-question":
+            if row_type == "oral-question" or row_type == "topical-question":
                 q_num, q_id, clean_text = parse_oral_question_meta(cleaned_verbatim)
                 
                 if q_id and q_num:
@@ -130,14 +130,7 @@ class SeneddPipeline:
                     if cleaned_translated:
                         _, _, clean_trans_text = parse_oral_question_meta(cleaned_translated)
                         cleaned_translated = clean_trans_text
-                    
-                    # oral_q = OralQuestion(
-                    #     question_id=q_id,
-                    #     meeting_id=raw.meeting_id,
-                    #     contribution_id=raw.contribution_id,
-                    #     question_number=q_num,
-                    # )
-                    # session.merge(oral_q)
+
                     oral_questions_batch.append({
                         "question_id": q_id,
                         "meeting_id": raw.meeting_id,
@@ -145,19 +138,6 @@ class SeneddPipeline:
                         "question_number": q_num,
                     })
 
-            # clean = CleanContribution(
-            #     contribution_id=raw.contribution_id,
-            #     contribution_verbatim_clean=cleaned_verbatim,
-            #     contribution_translated_clean=cleaned_translated,
-            # )
-            # classified = ClassifiedContribution(
-            #     contribution_id=raw.contribution_id,
-            #     row_type=RowTypeEnum(row_type),
-            #     classification_reason=reason,
-            # )
-            
-            # session.merge(clean)
-            # session.merge(classified)
             clean_contributions_batch.append({
                 "contribution_id": raw.contribution_id,
                 "contribution_verbatim_clean": cleaned_verbatim,

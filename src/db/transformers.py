@@ -71,7 +71,14 @@ def classify_contribution(row: dict) -> Tuple[str, str]:
         return ('procedural', f'Contribution type {contribution_type}')
     
     if contribution_type == 'O':
-        return ('oral-question', f'Contribution type {contribution_type}')
+        verbatim = row.get('contribution_verbatim', '')
+        if not verbatim:
+            return ('oral-question', f'Contribution type {contribution_type}')
+        else:
+            if "TQ" in verbatim:
+                return ('topical-question', f'Contribution type {contribution_type}')
+            elif 'OQ' in verbatim:
+                return ('oral-question', f'Contribution type {contribution_type}')
     # Check if row is noise (no speaker, no text)
     if not member_id and not text:
         return ('noise', 'No speaker and no text')
@@ -80,6 +87,8 @@ def classify_contribution(row: dict) -> Tuple[str, str]:
     if member_id and text:
         return ('speech', 'Valid speech')
     
+    if contribution_type == 'V':
+        return ('procedural', f'Contribution type {contribution_type}')
     # Fallback: noise
     return ('noise', 'Insufficient content')
 
@@ -97,7 +106,7 @@ def parse_oral_question_meta(text: str) -> Tuple[Optional[int], Optional[str], s
     text_stripped = text.strip().strip('"\'')
 
     pattern = (
-        r"^\s*(?P<question_num>\d+)\.\s*(?P<clean_text>.*?)\s*(?P<question_id>OQ\d+)\s*$"
+        r"^\s*(?P<question_num>\d+)\.\s*(?P<clean_text>.*?)\s*(?P<question_id>(?:OQ|TQ)\d*)\s*$"
     )
     
     match = re.match(pattern, text_stripped)
