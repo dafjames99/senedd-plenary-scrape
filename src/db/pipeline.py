@@ -41,6 +41,24 @@ class SeneddPipeline:
         self._ensure_database_exists()
         Base.metadata.create_all(self.engine)
         logger.info("Database schema created successfully.")
+        procedures_dir = Path(__file__).resolve().parent / "procedures"
+        if procedures_dir.exists():
+            logger.info("Discovering repo-tracked SQL procedures...")
+            
+            # Sort ensures 001 runs before 002
+            for sql_file in sorted(procedures_dir.glob("*.sql")):
+                try:
+                    with open(sql_file, "r", encoding="utf-8") as f:
+                        sql_script = f.read()
+                    
+                    # Execute the raw CREATE OR REPLACE PROCEDURE block
+                    with self.engine.connect() as conn:
+                        # Using execution_options(isolate_level="AUTOCOMMIT") handles complex blocks cleanly
+                        conn.execute(text(sql_script))
+                    logger.info(f"[✓] Embedded native database routine: {sql_file.name}")
+                    
+                except Exception as e:
+                    logger.error(f"[!] Failed to seed target database routine {sql_file.name}: {e}")
         
     def ingest_xml(self, session: Session, xml_file: Path) -> int:
         """
