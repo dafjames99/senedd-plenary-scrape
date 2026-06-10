@@ -318,7 +318,8 @@ class SeneddPipeline:
                 'speech_language': speech_dict['speech_language'],
                 'speech_text': ' '.join(speech_dict['texts']),
                 'source_row_count': len(speech_dict['speech_parts']),
-                'created_at': datetime.now()
+                'created_at': datetime.now(),
+                '_raw_parts': speech_dict['speech_parts']
             })
             
             # Cache the speech parts metadata for child tables
