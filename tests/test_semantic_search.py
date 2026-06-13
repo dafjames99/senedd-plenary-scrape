@@ -1,0 +1,293 @@
+"""Tests for semantic_search in scripts/query_speeches.py.
+
+These are unit tests — the database session and embedding provider are mocked,
+so no PostgreSQL instance or GPU is required. The tests verify query construction
+logic, result filtering, and output structure, not vector retrieval accuracy.
+"""
+import io
+import sys
+from datetime import datetime
+from typing import Optional
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
+
+from scripts.query_speeches import SearchResult, display_results, semantic_search
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+class _Row:
+    """Stand-in for a SQLAlchemy Row with named attributes."""
+    def __init__(
+        self,
+        speech_id: int = 1,
+        speaker_name: str = "Test Speaker",
+        speech_text: str = "Full speech text.",
+        agenda_item_id: str = "AGN-001",
+        meeting_date: Optional[datetime] = None,
+        chunk_text: str = "Relevant passage from speech.",
+        cosine_distance: float = 0.2,
+        spoken_url: Optional[str] = None,
+    ):
+        self.speech_id = speech_id
+        self.speaker_name = speaker_name
+        self.speech_text = speech_text
+        self.agenda_item_id = agenda_item_id
+        self.meeting_date = meeting_date or datetime(2026, 1, 15)
+        self.chunk_text = chunk_text
+        self.cosine_distance = cosine_distance
+        self.spoken_url = spoken_url
+
+
+def _make_search_setup(rows, model_name="test/model", query_prefix=""):
+    """Return (mock_register, mock_registry, mock_pipeline) configured for a test run."""
+    mock_provider = MagicMock()
+    mock_provider.model_name = model_name
+    mock_provider.embed_batch.return_value = [[0.1, 0.2, 0.3]]
+
+    mock_register = MagicMock()
+    mock_register.get.return_value = lambda _: mock_provider
+
+    mock_registry = {model_name: {"query_prefix": query_prefix, "doc_prefix": ""}}
+
+    mock_session = MagicMock()
+    mock_session.__enter__ = lambda s: s
+    mock_session.__exit__ = MagicMock(return_value=False)
+    mock_session.execute.return_value.fetchall.return_value = rows
+
+    mock_pipeline = MagicMock()
+    mock_pipeline.return_value.SessionLocal.return_value = mock_session
+
+    return mock_provider, mock_register, mock_registry, mock_pipeline
+
+
+# ---------------------------------------------------------------------------
+# Tests: query construction
+# ---------------------------------------------------------------------------
+
+def test_query_prefix_applied():
+    """Model-specific query_prefix must be prepended before embed_batch is called."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(
+        rows=[], query_prefix="task: search | query: "
+    )
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("NHS reform", provider_string="test", model_string="test/model")
+
+    mock_provider.embed_batch.assert_called_once_with(["task: search | query: NHS reform"])
+
+
+def test_no_query_prefix_when_empty():
+    """When query_prefix is empty the raw query text is embedded unchanged."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(
+        rows=[], query_prefix=""
+    )
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("climate policy", provider_string="test", model_string="test/model")
+
+    mock_provider.embed_batch.assert_called_once_with(["climate policy"])
+
+
+def test_model_name_passed_to_sql():
+    """model_name must appear in the SQL parameters so results are scoped to one model."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("budget", provider_string="test", model_string="test/model")
+
+    call_params = mock_pipeline.return_value.SessionLocal.return_value.execute.call_args[0][1]
+    assert call_params["model_name"] == "test/model"
+
+
+def test_speaker_filter_in_params():
+    """speaker_filter must be passed as a wildcard-wrapped bound parameter."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("housing", speaker_filter="Jones",
+                        provider_string="test", model_string="test/model")
+
+    call_params = mock_pipeline.return_value.SessionLocal.return_value.execute.call_args[0][1]
+    assert call_params["speaker_filter"] == "%Jones%"
+
+
+def test_no_speaker_filter_param_when_omitted():
+    """speaker_filter key must not appear in params when the argument is None."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("housing", provider_string="test", model_string="test/model")
+
+    call_params = mock_pipeline.return_value.SessionLocal.return_value.execute.call_args[0][1]
+    assert "speaker_filter" not in call_params
+
+
+# ---------------------------------------------------------------------------
+# Tests: result filtering
+# ---------------------------------------------------------------------------
+
+def test_min_similarity_excludes_low_confidence():
+    """Rows whose similarity score falls below min_similarity must be dropped."""
+    rows = [
+        _Row(speech_id=1, cosine_distance=0.6),   # similarity = 40%
+        _Row(speech_id=2, cosine_distance=0.1),   # similarity = 90%
+    ]
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        results = semantic_search("test query", min_similarity=50.0,
+                                  provider_string="test", model_string="test/model")
+
+    assert len(results) == 1
+    assert results[0].speech_id == 2
+
+
+def test_top_k_limits_results():
+    """No more than top_k results should be returned even if DB returns more."""
+    rows = [_Row(speech_id=i, cosine_distance=0.1 * i) for i in range(1, 11)]
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        results = semantic_search("test query", top_k=3,
+                                  provider_string="test", model_string="test/model")
+
+    assert len(results) == 3
+
+
+def test_no_results_returns_empty_list():
+    """Empty DB response must return an empty list without raising."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        results = semantic_search("anything", provider_string="test", model_string="test/model")
+
+    assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: SearchResult structure
+# ---------------------------------------------------------------------------
+
+def test_result_fields_populated():
+    """SearchResult must carry all context fields from the DB row."""
+    meeting_date = datetime(2026, 3, 10)
+    rows = [_Row(
+        speech_id=42,
+        speaker_name="Eluned Morgan AS",
+        speech_text="Full text of the speech.",
+        agenda_item_id="260310-4",
+        meeting_date=meeting_date,
+        chunk_text="Eluned Morgan AS: We must act on this.",
+        cosine_distance=0.15,
+        spoken_url="http://www.senedd.tv/en/9999?startPos=120",
+    )]
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        results = semantic_search("mental health", provider_string="test", model_string="test/model")
+
+    assert len(results) == 1
+    r = results[0]
+    assert r.speech_id == 42
+    assert r.speaker_name == "Eluned Morgan AS"
+    assert r.meeting_date == meeting_date
+    assert r.agenda_item_id == "260310-4"
+    assert r.speech_text == "Full text of the speech."
+    assert r.chunk_text == "Eluned Morgan AS: We must act on this."
+    assert r.senedd_tv_url == "http://www.senedd.tv/en/9999?startPos=120"
+    assert abs(r.similarity_score - 85.0) < 0.1
+    assert isinstance(r, SearchResult)
+
+
+def test_similarity_score_computed_correctly():
+    """similarity_score = (1 - cosine_distance) * 100, rounded to 2dp."""
+    rows = [_Row(cosine_distance=0.234)]
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
+    with (
+        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
+        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+    ):
+        results = semantic_search("test", provider_string="test", model_string="test/model")
+
+    assert results[0].similarity_score == round((1 - 0.234) * 100, 2)
+
+
+# ---------------------------------------------------------------------------
+# Tests: display_results
+# ---------------------------------------------------------------------------
+
+def test_display_results_empty(capsys):
+    display_results("climate change", [])
+    captured = capsys.readouterr()
+    assert "No matching speeches found" in captured.out
+
+
+def test_display_results_shows_speaker_and_date(capsys):
+    results = [SearchResult(
+        speech_id=1,
+        speaker_name="Mark Drakeford AS",
+        meeting_date=datetime(2026, 3, 1),
+        agenda_item_id="260301-2",
+        chunk_text="Mark Drakeford AS: We are committed to this.",
+        speech_text="Full speech.",
+        cosine_distance=0.1,
+        similarity_score=90.0,
+        senedd_tv_url=None,
+    )]
+    display_results("NHS", results)
+    captured = capsys.readouterr()
+    assert "Mark Drakeford AS" in captured.out
+    assert "01 Mar 2026" in captured.out
+    assert "90.0%" in captured.out
+    assert "260301-2" in captured.out
+
+
+def test_display_results_shows_senedd_tv_url(capsys):
+    results = [SearchResult(
+        speech_id=2,
+        speaker_name="Speaker",
+        meeting_date=datetime(2026, 1, 1),
+        agenda_item_id="AGN-1",
+        chunk_text="Some text.",
+        speech_text="Full.",
+        cosine_distance=0.2,
+        similarity_score=80.0,
+        senedd_tv_url="http://www.senedd.tv/en/1234",
+    )]
+    display_results("query", results)
+    captured = capsys.readouterr()
+    assert "http://www.senedd.tv/en/1234" in captured.out

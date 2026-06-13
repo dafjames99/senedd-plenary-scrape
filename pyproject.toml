@@ -17,6 +17,11 @@ dependencies = [
     "sqlalchemy-utils>=0.42.1",
 ]
 
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
 [project.optional-dependencies]
 openai = [
     "openai>=2.40.0",
