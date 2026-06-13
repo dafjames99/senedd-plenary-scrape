@@ -78,7 +78,14 @@ class EmbeddingPipeline:
             metadata_payloads = []
             
             # 1. Chunk texts using your sliding window utility
+            MIN_SPEECH_WORDS = 10
             for speech in speeches:
+                if len(speech.speech_text.split()) < MIN_SPEECH_WORDS:
+                    logger.debug(
+                        "Skipping speech %d (%r): below %d-word threshold.",
+                        speech.speech_id, speech.speaker_name, MIN_SPEECH_WORDS
+                    )
+                    continue
                 chunks = chunk_text(speech.speech_text, max_words=max_words)
                 speaker_prefix = f"{speech.speaker_name}: "
                 for idx, chunk in enumerate(chunks):
