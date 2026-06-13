@@ -80,13 +80,15 @@ class EmbeddingPipeline:
             # 1. Chunk texts using your sliding window utility
             for speech in speeches:
                 chunks = chunk_text(speech.speech_text, max_words=max_words)
+                speaker_prefix = f"{speech.speaker_name}: "
                 for idx, chunk in enumerate(chunks):
-                    formatted_chunk = f"{doc_prefix}{chunk}" if doc_prefix else chunk
+                    contextualized = speaker_prefix + chunk
+                    formatted_chunk = f"{doc_prefix}{contextualized}" if doc_prefix else contextualized
                     chunks_to_embed.append(formatted_chunk)
                     metadata_payloads.append({
                         "speech_id": speech.speech_id,
                         "chunk_index": idx,
-                        "chunk_text": chunk
+                        "chunk_text": contextualized,
                     })
                     
             if not chunks_to_embed:

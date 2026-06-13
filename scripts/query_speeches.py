@@ -69,7 +69,7 @@ def semantic_search(query_text: str, top_k: int = 5, provider_string: str = None
         similarity_score = (1 - row.cosine_distance) * 100
         
         print(f"\n[{i}] SPEECH ID: {row.speech_id} | Match Confidence: {similarity_score:.2f}%")
-        print(f"    Excerpt: {row.chunk_text[:180].strip()}...")
+        print(f"    Excerpt: {row.chunk_text[:180].strip()}")
         print("-" * 60)
 
 
