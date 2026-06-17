@@ -35,31 +35,29 @@ MCP; speech-only MVP before Votes/QNR.** Don't reorder.
 You can't tell if anything improves without measurement, and you can't safely change schema
 without migrations. Both come first.
 
-### 0A. Retrieval eval harness  *(unlocks every later quality decision; ~$0 to run)*
-- [ ] Create `tests/eval/` with a labelled set: `(query, expected_speech_ids[])` pairs,
+### 0A. Retrieval eval harness  *(DONE — `tests/eval/`, baseline in BASELINE.md)*
+- [x] Create `tests/eval/` with a labelled set: `(query, expected_speech_ids[])` pairs,
       hand-built from the existing ~1–2 months of gemma-embedded data.
-- [ ] Implement metrics: hit-rate@k, recall@k, MRR.
-- [ ] Runner: pytest + a small CLI that prints a scoreboard for the active model.
-- [ ] Record the **current baseline** numbers (so refactors are provably non-regressive).
-- [ ] Runs against the **local gemma DB** — no LLM calls, no API spend.
+- [x] Implement metrics: hit-rate@k, recall@k, MRR.
+- [x] Runner: pytest (metrics, offline) + a CLI scoreboard (`runner.py`, live).
+- [x] Record the **current baseline**: MRR 0.903, hit@1 0.83, @3 1.00 (`BASELINE.md`).
+- [x] Runs against the **local gemma DB** — no LLM calls, no API spend.
 
-### 0B. Alembic adoption + pipeline decoupling
-- [ ] `uv add alembic`; `alembic init`.
-- [ ] Configure `env.py`: import `Base.metadata`, use `settings.database_url`, ensure the
-      pgvector `Vector` type and the `RowTypeEnum` are importable for autogenerate.
-- [ ] Move `CREATE EXTENSION vector` (currently the `before_create` listener in
-      `db_schema.py`) into the **initial migration**.
-- [ ] Generate an initial migration representing the **current** schema, then
-      `alembic stamp head` on the existing populated DB (adopt-on-populated-DB dance —
-      do **not** run the migration against existing tables).
-- [ ] Decouple `pipeline.py`:
-  - [ ] Provisioning becomes `alembic upgrade head`; stop treating `create_all()` as truth.
-  - [ ] Reframe `--force` to mean **rebuild data** (TRUNCATE via `002_purge_all_tables.sql`),
-        not drop schema.
-  - [ ] Keep the `purge_*` SQL procedures and all transformation phases unchanged (data, not DDL).
-- [ ] Document the per-change workflow: `alembic revision --autogenerate -m "..."` →
-      **review the draft** (autogenerate misses type changes / server defaults) → `upgrade head`.
-- [ ] Keep `create_all()` only where an ephemeral DB is fine (e.g. mocked tests).
+### 0B. Alembic adoption + pipeline decoupling  *(DONE)*
+- [x] `uv add alembic`; `alembic init`.
+- [x] Configure `env.py`: `Base.metadata`, URL from settings (`-x db_url=` override),
+      `compare_type=True`; logging guard so programmatic runs don't clobber the app logger.
+- [x] `CREATE EXTENSION vector` lives in the baseline migration's `upgrade()`.
+- [x] Baseline migration captures the current schema; existing populated DB `stamp`ed at it.
+      (Verified the migration builds 12 tables + extension and round-trips on a throwaway DB.)
+- [x] Decouple `pipeline.py`:
+  - [x] `create_schema()` → `run_migrations()` (`alembic upgrade head`) + `_load_procedures()`;
+        no more `create_all()`.
+  - [x] `--force` / `run_full_pipeline()` re-scoped to **rebuild data** (`CALL purge_all_tables()`),
+        schema preserved.
+  - [x] `purge_*` procedures and all transformation phases unchanged.
+- [x] Per-change workflow documented in `alembic/README`.
+- [x] `before_create` extension listener left as a harmless safety net for test `create_all`.
 
 ---
 

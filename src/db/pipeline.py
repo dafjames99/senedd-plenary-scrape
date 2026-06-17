@@ -1,5 +1,6 @@
 """Main orchestrator for the Senedd XML-to-speech reconstruction pipeline."""
 import os
+import argparse
 from pathlib import Path
 from datetime import datetime
 from typing import Literal, Optional, List
@@ -7,9 +8,11 @@ from sqlalchemy import create_engine, text, func
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy_utils import database_exists, create_database
+from alembic import command
+from alembic.config import Config
 from src.db.db_schema import (
-    Base, Meeting, Member, MemberJobTitle, RawContribution, CleanContribution, 
-    ClassifiedContribution, Speech, SpeechPart, ProceduralEvent, 
+    Meeting, Member, MemberJobTitle, RawContribution, CleanContribution,
+    ClassifiedContribution, Speech, SpeechPart, ProceduralEvent,
     RowTypeEnum, SyncCheckpoint, OralQuestion
 )
 from src.db.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
@@ -18,6 +21,10 @@ from src.db.parser import parse_senedd_xml
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Repository root: src/db/pipeline.py -> parents[2]
+ROOT_DIR = Path(__file__).resolve().parents[2]
+
 
 class SeneddPipeline:
     """Orchestrator for XML parsing, cleaning, classification, and speech reconstruction."""
@@ -35,31 +42,57 @@ class SeneddPipeline:
             create_database(self.db_url)
             logger.info("Database spawned successfully.")
     
-    def create_schema(self):
-        """Verify database cluster target existence, compile extensions, and build tables."""
-        # 1. Step out of the session context to verify the database container itself exists
-        self._ensure_database_exists()
-        Base.metadata.create_all(self.engine)
-        logger.info("Database schema created successfully.")
+    def _alembic_config(self) -> Config:
+        """Build an Alembic Config bound to this pipeline's database URL.
+
+        The URL is passed to ``env.py`` via the ``-x db_url=`` argument so the
+        pipeline can migrate whatever database it was constructed against, and
+        ``configure_logger`` is disabled so Alembic does not clobber the
+        application's logging setup.
+        """
+        cfg = Config(str(ROOT_DIR / "alembic.ini"))
+        cfg.set_main_option("script_location", str(ROOT_DIR / "alembic"))
+        cfg.cmd_opts = argparse.Namespace(x=[f"db_url={self.db_url}"])
+        cfg.attributes["configure_logger"] = False
+        return cfg
+
+    def run_migrations(self):
+        """Bring the database schema up to the latest Alembic revision.
+
+        Alembic owns all DDL. This is idempotent — a no-op when already at head.
+        """
+        logger.info("Applying database migrations (alembic upgrade head)...")
+        command.upgrade(self._alembic_config(), "head")
+        logger.info("Database schema is at head revision.")
+
+    def _load_procedures(self):
+        """Register repo-tracked SQL stored procedures (DATA-lifecycle helpers)."""
         procedures_dir = Path(__file__).resolve().parent / "procedures"
-        if procedures_dir.exists():
-            logger.info("Discovering repo-tracked SQL procedures...")
-            
-            # Sort ensures 001 runs before 002
-            for sql_file in sorted(procedures_dir.glob("*.sql")):
-                try:
-                    with open(sql_file, "r", encoding="utf-8") as f:
-                        sql_script = f.read()
-                    
-                    # Execute the raw CREATE OR REPLACE PROCEDURE block
-                    with self.engine.connect() as conn:
-                        # Using execution_options(isolate_level="AUTOCOMMIT") handles complex blocks cleanly
-                        conn.execute(text(sql_script))
-                    logger.info(f"[✓] Embedded native database routine: {sql_file.name}")
-                    
-                except Exception as e:
-                    logger.error(f"[!] Failed to seed target database routine {sql_file.name}: {e}")
-        
+        if not procedures_dir.exists():
+            return
+        logger.info("Discovering repo-tracked SQL procedures...")
+        # Sort ensures 001 runs before 002
+        for sql_file in sorted(procedures_dir.glob("*.sql")):
+            try:
+                sql_script = sql_file.read_text(encoding="utf-8")
+                with self.engine.connect() as conn:
+                    conn.execute(text(sql_script))
+                    conn.commit()
+                logger.info(f"[✓] Embedded native database routine: {sql_file.name}")
+            except Exception as e:
+                logger.error(f"[!] Failed to seed target database routine {sql_file.name}: {e}")
+
+    def create_schema(self):
+        """Provision the database: ensure it exists, migrate to head, register procedures.
+
+        Schema structure is owned by Alembic (``run_migrations``); this method no
+        longer issues ``create_all`` — that could not ALTER existing tables and was
+        the source of the historic rebuild brittleness.
+        """
+        self._ensure_database_exists()
+        self.run_migrations()
+        self._load_procedures()
+
     def ingest_xml(self, session: Session, xml_file: Path) -> int:
         """
         Phase 1: Parse XML and load into raw_contributions, meetings, and members.
@@ -504,15 +537,23 @@ class SeneddPipeline:
             self.build_procedural_events(session, m_id)
     
     def run_full_pipeline(self, xml_file: Path):
-        """Run all pipeline phases (fresh rebuild)."""
-        logger.info("Initializing full pipeline database reset and sync routine execution sequence.")
-        # Drop existing schema for fresh start
-        self._ensure_database_exists()        
-        Base.metadata.drop_all(self.engine)
-        logger.info("Dropped all tables from schema target.")
-        
+        """Rebuild all DATA from a source XML file, preserving the schema.
+
+        Re-scoped from the historic "drop and recreate schema" behaviour: schema
+        structure is owned by Alembic and left intact. ``--force`` now means a full
+        DATA wipe (``purge_all_tables`` truncates every table, including
+        sync_checkpoints) followed by re-ingestion.
+        """
+        logger.info("Initializing full DATA rebuild (schema preserved, managed by Alembic).")
+        # Ensure schema exists / is at head and procedures are registered.
         self.create_schema()
-        
+
+        # Wipe all data (CASCADE truncation) without touching the schema.
+        logger.warning("Truncating ALL tables via purge_all_tables() — data reset.")
+        with self.SessionLocal() as session:
+            with session.begin():
+                session.execute(text("CALL purge_all_tables();"))
+
         # Ingest XML
         with self.SessionLocal() as session:
             with session.begin():

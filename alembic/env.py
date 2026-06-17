@@ -24,7 +24,12 @@ from src.db.settings import settings  # noqa: E402
 
 config = context.config
 
-if config.config_file_name is not None:
+# Only reconfigure logging from alembic.ini when invoked as the Alembic CLI.
+# When the pipeline runs migrations programmatically it sets
+# attributes["configure_logger"] = False so the app's logging is left intact.
+if config.config_file_name is not None and config.attributes.get(
+    "configure_logger", True
+):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

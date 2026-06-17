@@ -73,7 +73,7 @@ def main():
     parser.add_argument(
         '-f', "--force",
         action="store_true",
-        help="Force a complete database teardown and full rebuild from the source files."
+        help="Force a full DATA rebuild from the source files (schema preserved; structure is managed by Alembic)."
     )
     parser.add_argument(
         "--embed-loop",
@@ -120,12 +120,12 @@ def main():
         pipeline.reprocess_downstream_from_raw(clear_dimensions=False, clear_embeddings=False)
     elif args.mode == "sync":
         if args.force:
-            logger.warning("!!! FORCE REBUILD ACTIVATED !!! Executing structural teardown...")
+            logger.warning("!!! FORCE REBUILD ACTIVATED !!! Wiping all DATA (schema preserved)...")
             if not args.xml_file.exists():
                 logger.error("Target source payload template not found for full rebuild: %s", args.xml_file)
                 return
-            # Executes schema drop and full historic ingestion
-            
+            # Truncates all data then re-ingests; schema structure stays under Alembic
+
             pipeline.run_full_pipeline(args.xml_file)
             run_embedding_sweep(loop_until_empty=args.embed_loop, batch_size=BATCH_SIZE, force_reset=True, interactive=args.interactive)
         else:
