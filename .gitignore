@@ -14,6 +14,9 @@ wheels/
 *.db
 senedd_records.db
 
+# Eval harness output (regenerable)
+eval_*.json
+
 # Raw data files
 data/
 data/*.xml

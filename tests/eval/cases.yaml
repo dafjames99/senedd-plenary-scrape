@@ -1,0 +1,77 @@
+# Labelled known-item retrieval cases for the semantic-search eval harness.
+#
+# Each case is a natural-language query authored to describe the content of one
+# or more specific speeches already in the corpus. The metric asks: does the
+# active retrieval stack surface those speeches near the top?
+#
+# How to grow this set:
+#   1. Find a substantive English speech (scripts/query_speeches.py or SQL).
+#   2. Write a query a real user might ask that the speech answers — a paraphrase,
+#      NOT a quote. Keep it at a realistic level of generality.
+#   3. Add its speech_id (and any genuinely-equivalent speeches) below.
+#
+# Marking only the obvious target is fine: extra relevant-but-unmarked speeches
+# only make the score conservative, never inflated.
+#
+# Seed set authored against the gemma corpus (meetings 2026-03-02 .. 2026-06-09).
+
+cases:
+  - id: paediatric-waiting-times
+    query: What are the waiting times and targets for community paediatric services?
+    relevant_speech_ids: [35]
+    note: Jeremy Miles on the absence of specific community paediatrics waiting-time targets.
+
+  - id: too-many-health-targets
+    query: Concerns that the health service has too many targets to be meaningful
+    relevant_speech_ids: [37]
+    note: Jeremy Miles on the proliferation of targets across the NHS.
+
+  - id: community-child-health-underinvestment
+    query: Chronic underinvestment in the community paediatric and child health workforce
+    relevant_speech_ids: [39]
+    note: Jenny Rathbone citing the Royal College of Paediatrics and Child Health.
+
+  - id: flying-start-health-visitors
+    query: Flying Start, the shortage of health visitors, and enhanced visiting for families
+    relevant_speech_ids: [57, 63, 65]
+    note: Dawn Bowden exchange on Flying Start health-visitor capacity and skill mix.
+
+  - id: perinatal-mental-health-north-wales
+    query: In-patient perinatal mental health care for mothers in north Wales
+    relevant_speech_ids: [91, 100]
+    note: Sarah Murphy on community-focused perinatal mental health and north Wales in-patient care.
+
+  - id: parent-advocacy-child-protection
+    query: A statutory entitlement to parent advocacy for parents at risk of child protection proceedings
+    relevant_speech_ids: [128]
+    note: Cefin Campbell on parent advocacy for parents at risk of entering child protection.
+
+  - id: gp-surgery-closures
+    query: The impact of GP surgery closures and mergers on patients in rural and urban Wales
+    relevant_speech_ids: [1022]
+    note: Vaughan Gething on dislocation from GP practice closures.
+
+  - id: child-poverty-strategy
+    query: The Welsh Government's strategy to tackle and mitigate child poverty
+    relevant_speech_ids: [3801]
+    note: Jane Hutt on the child poverty strategy and devolved powers.
+
+  - id: internal-market-act-review
+    query: The UK Government's review of the UK Internal Market Act and the case for repeal
+    relevant_speech_ids: [841]
+    note: Huw Irranca-Davies on disappointment that the UKIMA review proposed no legislative change.
+
+  - id: building-safety-bill-principles
+    query: Support for the building safety Bill and new controls on residential building safety
+    relevant_speech_ids: [1337]
+    note: Sian Gwenllian declaring Plaid Cymru support for the building safety Bill's principles.
+
+  - id: building-safety-information-duty
+    query: A duty on Welsh Ministers to require accountable persons to share building safety information
+    relevant_speech_ids: [1363]
+    note: Sian Gwenllian on amendment 52 compelling information-sharing duties.
+
+  - id: building-safety-progress-reports
+    query: Requiring Welsh Ministers to publish progress reports on bringing the Act's provisions into force
+    relevant_speech_ids: [1441]
+    note: Sian Gwenllian on a duty to publish progress reports on commencement.
