@@ -7,7 +7,7 @@ the document side and that every result carries full citation metadata.
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional, Union
+from typing import List, Optional
 
 from sqlalchemy import text
 
@@ -15,10 +15,9 @@ from src.db.pipeline import SeneddPipeline
 from src.db.settings import settings
 from src.embeddings.config import MODEL_METADATA_REGISTRY
 from src.embeddings.providers import PROVIDER_REGISTER
+from src.search._dates import DateLike, coerce_datetime
 
 logger = logging.getLogger(__name__)
-
-DateLike = Union[datetime, str]
 
 
 @dataclass
@@ -34,21 +33,6 @@ class SearchResult:
     cosine_distance: float
     similarity_score: float
     senedd_tv_url: Optional[str]
-
-
-def _coerce_datetime(value: DateLike, *, end_of_day: bool = False) -> datetime:
-    """Normalise a date/datetime input to a ``datetime``.
-
-    Bare ``YYYY-MM-DD`` strings (or dates with no time component) are pinned to
-    the start of the day, or to ``23:59:59`` when ``end_of_day`` is set — so an
-    inclusive ``date_to`` covers that whole day rather than excluding its
-    afternoon sittings.
-    """
-    if isinstance(value, str):
-        value = datetime.fromisoformat(value)
-    if end_of_day and value.time() == datetime.min.time():
-        return value.replace(hour=23, minute=59, second=59, microsecond=999999)
-    return value
 
 
 def semantic_search(
@@ -114,10 +98,10 @@ def semantic_search(
         params["speaker_filter"] = f"%{speaker_filter}%"
     if date_from:
         conditions.append("m.meeting_date >= :date_from")
-        params["date_from"] = _coerce_datetime(date_from)
+        params["date_from"] = coerce_datetime(date_from)
     if date_to:
         conditions.append("m.meeting_date <= :date_to")
-        params["date_to"] = _coerce_datetime(date_to, end_of_day=True)
+        params["date_to"] = coerce_datetime(date_to, end_of_day=True)
     if agenda_item:
         conditions.append("s.agenda_item_id = :agenda_item")
         params["agenda_item"] = agenda_item

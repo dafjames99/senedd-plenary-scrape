@@ -61,22 +61,24 @@ without migrations. Both come first.
 
 ---
 
-## Phase 1 — Retrieval service layer  *(unblocks MCP; no schema dependency)*
+## Phase 1 — Retrieval service layer  *(DONE — unblocks MCP)*
 
-- [ ] Extract the core of `scripts/query_speeches.py::semantic_search` → `src/search/service.py`.
-- [ ] Push filters into the CTE `WHERE` (pre-filter before ranking, not Python post-filter):
-      `speaker`, `date_from`, `date_to`, `agenda_item`, and a `source_type`-ready hook.
-- [ ] Return typed dataclasses carrying full **citation metadata**: `speech_id`, `meeting_date`,
-      `speaker_name`, `agenda_item_id`, SeneddTV URL, official record URL.
-- [ ] Add service functions that the MCP will wrap:
-  - [ ] `get_speech(speech_id)` — full text.
-  - [ ] `filter_speeches(...)` — non-semantic structured listing (chronological use cases).
-  - [ ] `find_member(name)` / `get_member(member_id)` — entity resolution + role history.
-  - [ ] `list_meetings(...)` / `get_meeting(meeting_id)`.
-  - [ ] `get_agenda_thread(speech_id | meeting_id, agenda_item_id)` — ordered Q→answer→follow-up
-        reconstruction (solves "answered the question without using the keyword").
-- [ ] Reduce `scripts/query_speeches.py` to a thin CLI over the service.
-- [ ] Re-run the eval harness — confirm zero regression vs the 0A baseline.
+- [x] Extract `semantic_search` + `SearchResult` → `src/search/service.py`.
+- [x] Push filters into the CTE `WHERE` (pre-filter before ranking): `speaker`,
+      `date_from`, `date_to`, `agenda_item`, and a commented `source_type` hook for Phase 3.
+- [x] Typed dataclasses with **citation metadata**: `speech_id`, `meeting_date`,
+      `speaker_name`, `agenda_item_id`, `agenda_item_english`, SeneddTV URL.
+      *(Official record URL deferred — no reliable column; needs a URL scheme, not fabricated.)*
+- [x] Structured lookups in `src/search/lookups.py` (the MCP will wrap these):
+  - [x] `get_speech(speech_id)` — full text + context.
+  - [x] `filter_speeches(...)` — non-semantic structured listing (chronological).
+  - [x] `find_member(name)` / `get_member(member_id)` — resolution + role history.
+  - [x] `list_meetings(...)` / `get_meeting(meeting_id)` (with agenda items).
+  - [x] `get_agenda_thread(speech_id | meeting_id+agenda_item_id)` — ordered conversation.
+- [x] `scripts/query_speeches.py` reduced to a thin CLI over the service.
+- [x] Eval harness re-run: **zero regression, MRR 0.903** unchanged.
+- Note: fixed an `agenda_item_id`-collision bug — the id repeats across same-date
+  meetings, so the agenda-title lookup is now scoped by `meeting_id` too.
 
 ---
 
