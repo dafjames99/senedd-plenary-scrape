@@ -1,0 +1,54 @@
+Alembic migrations for the Senedd database
+==========================================
+
+Alembic owns the database STRUCTURE (DDL). The pipeline owns DATA lifecycle
+(ingest / clean / classify / reconstruct / embed, and the purge_* procedures).
+Keep these separate: schema changes go through Alembic; data rebuilds go through
+the pipeline. Never change structure with `Base.metadata.create_all()` again —
+it cannot ALTER existing tables, which was the original brittleness.
+
+The DB URL comes from `DATABASE_URL` in `.env` (via `alembic/env.py`), so no
+credentials live in `alembic.ini`.
+
+Day-to-day: changing the schema
+-------------------------------
+1. Edit the models in `src/db/db_schema.py`.
+2. Autogenerate a migration:
+       uv run alembic revision --autogenerate -m "add source_type to embeddings"
+3. REVIEW the generated file in `alembic/versions/`. Autogenerate is not perfect:
+     - pgvector columns render as a fully-qualified name with no import — change
+       to `Vector()` and add `from pgvector.sqlalchemy import Vector`.
+     - New Enum types: add `op.execute("DROP TYPE IF EXISTS <name>")` to downgrade.
+     - Data backfills (e.g. populating a new NOT NULL column) must be hand-added.
+4. Apply it:
+       uv run alembic upgrade head
+5. Sanity check, commit the migration file with the model change.
+
+Useful commands
+---------------
+    uv run alembic current            # what revision is the DB at
+    uv run alembic history            # list migrations
+    uv run alembic downgrade -1       # roll back one revision
+    uv run alembic upgrade head       # apply all pending
+
+Fresh database (new contributor, CI, Neon deploy)
+-------------------------------------------------
+    uv run alembic upgrade head       # builds the whole schema + pgvector ext
+
+Testing a migration before trusting it
+--------------------------------------
+Point Alembic at a throwaway empty DB so you never risk the real one:
+    uv run alembic -x db_url="postgresql+psycopg2://user:pass@localhost:5432/tmp" upgrade head
+(then downgrade base / upgrade head to confirm it round-trips, and drop the db).
+
+OUTSTANDING — pipeline decoupling (Phase 0B, not yet done)
+----------------------------------------------------------
+`src/db/pipeline.py` still manages structure in places that now conflict with
+Alembic. To finish the decoupling:
+  - `create_schema()`: stop calling `Base.metadata.create_all()`; provision via
+    `alembic upgrade head` (keep the procedure-loading step).
+  - `run_full_pipeline()` / `--force`: re-scope to mean "rebuild DATA"
+    (TRUNCATE via `002_purge_all_tables.sql`), NOT `drop_all()` of the schema.
+  - The `before_create` CREATE EXTENSION listener in `db_schema.py` is now also
+    handled by the baseline migration; it is harmless (idempotent) but redundant
+    once `create_all()` is gone.
