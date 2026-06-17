@@ -1,4 +1,4 @@
-"""Tests for semantic_search in scripts/query_speeches.py.
+"""Tests for semantic_search in src/search/service.py (+ the CLI display helper).
 
 These are unit tests — the database session and embedding provider are mocked,
 so no PostgreSQL instance or GPU is required. The tests verify query construction
@@ -14,7 +14,8 @@ import pytest
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 
-from scripts.query_speeches import SearchResult, display_results, semantic_search
+from scripts.query_speeches import display_results
+from src.search.service import SearchResult, semantic_search
 
 
 # ---------------------------------------------------------------------------
@@ -76,9 +77,9 @@ def test_query_prefix_applied():
         rows=[], query_prefix="task: search | query: "
     )
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         semantic_search("NHS reform", provider_string="test", model_string="test/model")
 
@@ -91,9 +92,9 @@ def test_no_query_prefix_when_empty():
         rows=[], query_prefix=""
     )
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         semantic_search("climate policy", provider_string="test", model_string="test/model")
 
@@ -104,9 +105,9 @@ def test_model_name_passed_to_sql():
     """model_name must appear in the SQL parameters so results are scoped to one model."""
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         semantic_search("budget", provider_string="test", model_string="test/model")
 
@@ -118,9 +119,9 @@ def test_speaker_filter_in_params():
     """speaker_filter must be passed as a wildcard-wrapped bound parameter."""
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         semantic_search("housing", speaker_filter="Jones",
                         provider_string="test", model_string="test/model")
@@ -133,14 +134,49 @@ def test_no_speaker_filter_param_when_omitted():
     """speaker_filter key must not appear in params when the argument is None."""
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         semantic_search("housing", provider_string="test", model_string="test/model")
 
     call_params = mock_pipeline.return_value.SessionLocal.return_value.execute.call_args[0][1]
     assert "speaker_filter" not in call_params
+
+
+def test_structured_filters_bound_when_provided():
+    """date_from/date_to/agenda_item must be passed as bound params when given."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
+    with (
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("housing", date_from="2026-03-01", date_to="2026-03-31",
+                        agenda_item="260301-2",
+                        provider_string="test", model_string="test/model")
+
+    call_params = mock_pipeline.return_value.SessionLocal.return_value.execute.call_args[0][1]
+    assert call_params["date_from"] == datetime(2026, 3, 1, 0, 0, 0)
+    # Bare date_to is pushed to end-of-day so the whole day is inclusive.
+    assert call_params["date_to"] == datetime(2026, 3, 31, 23, 59, 59, 999999)
+    assert call_params["agenda_item"] == "260301-2"
+
+
+def test_structured_filters_absent_when_omitted():
+    """No date/agenda keys should appear in params when the arguments are None."""
+    mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
+    with (
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
+    ):
+        semantic_search("housing", provider_string="test", model_string="test/model")
+
+    call_params = mock_pipeline.return_value.SessionLocal.return_value.execute.call_args[0][1]
+    assert "date_from" not in call_params
+    assert "date_to" not in call_params
+    assert "agenda_item" not in call_params
 
 
 # ---------------------------------------------------------------------------
@@ -155,9 +191,9 @@ def test_min_similarity_excludes_low_confidence():
     ]
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         results = semantic_search("test query", min_similarity=50.0,
                                   provider_string="test", model_string="test/model")
@@ -171,9 +207,9 @@ def test_top_k_limits_results():
     rows = [_Row(speech_id=i, cosine_distance=0.1 * i) for i in range(1, 11)]
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         results = semantic_search("test query", top_k=3,
                                   provider_string="test", model_string="test/model")
@@ -185,9 +221,9 @@ def test_no_results_returns_empty_list():
     """Empty DB response must return an empty list without raising."""
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=[])
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         results = semantic_search("anything", provider_string="test", model_string="test/model")
 
@@ -213,9 +249,9 @@ def test_result_fields_populated():
     )]
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         results = semantic_search("mental health", provider_string="test", model_string="test/model")
 
@@ -237,9 +273,9 @@ def test_similarity_score_computed_correctly():
     rows = [_Row(cosine_distance=0.234)]
     mock_provider, mock_register, mock_registry, mock_pipeline = _make_search_setup(rows=rows)
     with (
-        patch("scripts.query_speeches.PROVIDER_REGISTER", mock_register),
-        patch("scripts.query_speeches.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("scripts.query_speeches.SeneddPipeline", mock_pipeline),
+        patch("src.search.service.PROVIDER_REGISTER", mock_register),
+        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("src.search.service.SeneddPipeline", mock_pipeline),
     ):
         results = semantic_search("test", provider_string="test", model_string="test/model")
 
