@@ -36,10 +36,11 @@ class EmbeddingPipeline:
             select(Speech)
             .outerjoin(
                 SpeechEmbedding,
-                (Speech.speech_id == SpeechEmbedding.speech_id) &
+                (SpeechEmbedding.source_type == "speech") &
+                (SpeechEmbedding.source_id == Speech.speech_id) &
                 (SpeechEmbedding.model_name == self.provider.model_name)
             )
-            .where(SpeechEmbedding.speech_id == None)
+            .where(SpeechEmbedding.embedding_id == None)
             .where(Speech.speech_text != None)
             .where(Speech.speech_text != "")
             .limit(limit)
@@ -109,7 +110,9 @@ class EmbeddingPipeline:
             embedding_objects = []
             for meta, vector in zip(metadata_payloads, vectors):
                 embedding_obj = SpeechEmbedding(
-                    speech_id=meta["speech_id"],
+                    source_type="speech",
+                    source_id=meta["speech_id"],
+                    speech_id=meta["speech_id"],  # legacy column, kept this release
                     chunk_index=meta["chunk_index"],
                     chunk_text=meta["chunk_text"],
                     embedding_vector=vector,

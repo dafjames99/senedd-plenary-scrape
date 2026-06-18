@@ -1,5 +1,5 @@
 """SQLAlchemy models for Senedd speech pipeline."""
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, event, text
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, Index, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -231,11 +231,30 @@ class ProceduralEvent(Base):
 
 
 class SpeechEmbedding(Base):
-    """Vector embeddings for speeches (future layer)."""
+    """Polymorphic vector embeddings over any retrievable text source.
+
+    Historically speech-only; generalised in Phase 3 so one semantic search can
+    span spoken speeches and written QNR Q&A. The canonical discriminator is the
+    ``(source_type, source_id)`` pair — new code keys on it exclusively. The
+    legacy ``speech_id`` column (and its cascade FK) is retained for one release
+    as a rollback safety net for the populated gemma corpus and will be dropped
+    in a follow-up migration; until then speech rows populate both it and
+    ``source_id``. Because the generic ``source_id`` carries no FK, cleanup of
+    non-speech embeddings on reprocess/purge is handled explicitly in the
+    pipeline and the ``purge_*`` SQL procedures.
+    """
     __tablename__ = "speech_embeddings"
 
     embedding_id = Column(Integer, primary_key=True, autoincrement=True)
-    speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=False)
+
+    # Polymorphic discriminator: 'speech' | 'written' | 'vote'.
+    source_type = Column(String(20), nullable=False, server_default="speech")
+    source_id = Column(Integer, nullable=False)
+
+    # Legacy speech FK — nullable now; cascade still protects speech rows during
+    # the keep-then-drop window. NULL for non-speech sources.
+    speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=True)
+
     chunk_index = Column(Integer)
     chunk_text = Column(Text)
     embedding_vector = Column(Vector)
