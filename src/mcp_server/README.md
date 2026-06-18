@@ -46,6 +46,9 @@ Two things that matter for GUI clients (Claude Desktop):
   `--directory` makes uv use the project's venv and root regardless of where it
   was launched.
 
+Replace `/absolute/path/to/senedd-scrape` with your own project path (run `pwd`
+in the project root) and `/opt/homebrew/bin/uv` with your `uv` path (`which uv`).
+
 ## Tools
 
 | Tool | Purpose |
