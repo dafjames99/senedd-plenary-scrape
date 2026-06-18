@@ -8,6 +8,7 @@ dependencies = [
     "alembic>=1.18.4",
     "bs4>=0.0.2",
     "lxml>=6.1.1",
+    "mcp[cli]>=1.28.0",
     "ollama>=0.6.2",
     "pandas>=3.0.3",
     "pgvector>=0.4.2",

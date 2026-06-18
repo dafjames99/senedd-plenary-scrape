@@ -300,6 +300,31 @@ def get_member(member_id: int) -> Optional[MemberInfo]:
     )
 
 
+def list_members(limit: int = 500) -> List[MemberMatch]:
+    """List all members with speech counts, busiest first (roster for the MCP)."""
+    sql = text("""
+        SELECT mb.member_id, mb.name_english, mb.name_welsh, mb.sort_code,
+               COUNT(s.speech_id) AS speech_count
+        FROM members mb
+        LEFT JOIN speeches s ON s.speaker_id = mb.member_id
+        GROUP BY mb.member_id, mb.name_english, mb.name_welsh, mb.sort_code
+        ORDER BY speech_count DESC, mb.name_english ASC
+        LIMIT :limit
+    """)
+    with _session() as session:
+        rows = session.execute(sql, {"limit": limit}).fetchall()
+    return [
+        MemberMatch(
+            member_id=r.member_id,
+            name_english=r.name_english,
+            name_welsh=r.name_welsh,
+            sort_code=r.sort_code,
+            speech_count=r.speech_count,
+        )
+        for r in rows
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Meeting lookups
 # ---------------------------------------------------------------------------

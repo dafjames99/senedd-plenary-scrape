@@ -82,22 +82,23 @@ without migrations. Both come first.
 
 ---
 
-## Phase 2 — MCP MVP (speeches only)  *(shippable; delivers the headline use case)*
+## Phase 2 — MCP MVP (speeches only)  *(DONE — `src/mcp_server/`)*
 
-- [ ] **Invoke the `mcp-builder` skill** before writing server code.
-- [ ] `src/mcp_server/` with FastMCP; expose **stdio + streamable-HTTP** from one codebase.
-- [ ] Tools (thin wrappers over Phase 1): `search_speeches`, `get_speech`, `get_agenda_thread`,
-      `filter_speeches`, `find_member`, `get_member`, `list_meetings`, `get_meeting`.
-- [ ] **Tool descriptions** explicitly state: names/dates/agenda go in **filter params**, the
-      `query` string is the topical residue only (don't embed metadata).
-- [ ] Result sizing: return **excerpts + ids** by default; full text only via `get_speech`
-      (controls context size, cost, latency).
-- [ ] Resources: data dictionary / schema description, member roster, available date range,
-      active embedding model.
-- [ ] Prompts: `search-strategy` (extract filters → 2–4 focused searches → widen if weak →
-      synthesise **with citations**, claim nothing un-retrieved) and `position-over-time`.
-- [ ] Connect with a **read-only Postgres role**.
-- [ ] Wire into Claude Desktop config; manual Loop-B smoke testing.
+- [x] Invoked the `mcp-builder` skill.
+- [x] `src/mcp_server/` with FastMCP (`senedd_mcp`); stdio + streamable-HTTP via `--transport`.
+- [x] 8 tools wrapping Phase 1: `senedd_search_speeches`, `senedd_get_speech`,
+      `senedd_get_agenda_thread`, `senedd_filter_speeches`, `senedd_find_member`,
+      `senedd_get_member`, `senedd_list_meetings`, `senedd_get_meeting`. All read-only.
+- [x] Tool descriptions state: names/dates/agenda go in **filter params**, `query` is topic-only.
+- [x] Result sizing: search/threads carry **excerpts + ids**; full text only via `senedd_get_speech`.
+- [x] Resources: `senedd://data-dictionary`, `senedd://corpus-stats` (date range + active model),
+      `senedd://members`.
+- [x] Prompts: `senedd_search_strategy`, `senedd_position_over_time`.
+- [x] Verified end-to-end via FastMCP dispatch (tools/resources/prompts, error + validation paths);
+      run/registration docs in `src/mcp_server/README.md`.
+- [ ] **Read-only Postgres role** — deferred to deployment (Phase 5); local dev uses the dev role.
+- [ ] Manual Loop-B smoke test in a real client (Claude Desktop) — for you to run.
+- Follow-up: centralise DB connection pooling before the HTTP transport serves multiple clients.
 
 ---
 
