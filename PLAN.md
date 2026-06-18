@@ -102,44 +102,63 @@ without migrations. Both come first.
 
 ---
 
-## Phase 3 — New data via additive migrations  *(Alembic makes these cheap)*
+## Phase 3 — New data via additive migrations  *(DONE — `phase-3-votes-qnr`)*
 
-### 3A. Polymorphic embeddings
-- [ ] Migration: add `source_type` + `source_id` to `speech_embeddings`; backfill
-      `source_type='speech'`, `source_id=speech_id`.
-- [ ] Make the embedding pipeline + search source-aware so one query spans speeches + written QNR.
+> Embedding the new sources + the cross-source search were **re-scoped to Phase 4**:
+> embedding written/votes has no user value until the search surfaces them, and the
+> search source-filter already lived in Phase 4, so the two ship together there.
+
+### 3A. Polymorphic embeddings  *(DONE)*
+- [x] Migration: add `source_type` + `source_id` to `speech_embeddings`; backfill
+      `source_type='speech'`, `source_id=speech_id`. (4772 gemma rows backfilled; legacy
+      `speech_id` + cascade FK kept this release as a keep-then-drop rollback safety net.)
+- [x] Make the embedding pipeline + search **source-aware** (write/search key on
+      `(source_type, source_id)`; eval MRR 0.903 unchanged).
+      *(Actually embedding/spanning the other sources → Phase 4.)*
 - [ ] Decide indexing: a **fixed-dim, indexed** column for the prod model vs. the current
       dimensionless `Vector` column (which can't be ANN-indexed). See Phase 5.
 
-### 3B. Votes  *(pure data; high analytical value; easiest)*
-- [ ] Schema: `votes` (motion-level, natural key = `Contribution_ID`, FK → `raw_contributions`,
+### 3B. Votes  *(DONE)*
+- [x] Schema: `votes` (motion-level, natural key = `Contribution_ID`, FK → `raw_contributions`,
       tallies, result EN/CY, vote_name EN/CY, agenda_item) and `vote_records`
-      (per-member: `vote_id` FK, `member_id` FK, result For/Against/Abstain).
-- [ ] `parse_votes_xml` in the parser.
-- [ ] Fetcher: handle the `"Votes"` transcript type (Literal already anticipates it).
-- [ ] Ingestion phase + routing by artifact type.
-- [ ] Embed `vote_name_english` for semantic vote discovery.
+      (per-member: `vote_id` FK, `member_id` FK, result **For/Against/Abstain/DidNotVote** —
+      the source has a 4th value the original spec missed).
+- [x] `parse_votes_xml` in the parser (dedup by `Contribution_ID`; `Vote_Name` is junk, use EN).
+- [x] Fetcher: handle the `"Votes"` transcript type (filename-suffix bug fixed).
+- [x] Ingestion (`ingest_votes`): member upsert; defers votes whose motion contribution
+      isn't ingested yet (retried idempotently) rather than failing the FK.
+- → Embed `vote_name_english` for semantic vote discovery: **moved to Phase 4.**
 
-### 3C. QNR  *(written Q&A)*
-- [ ] Schema: `written_contributions` (`qa_role` = question|answer, `pair_id` linking Q↔A,
-      `meeting_id`, `agenda_item_id`, `speaker_id` nullable — **answers are attributed by job
-      title with no `Member_Id`**).
-- [ ] `parse_qnr_xml` + clean step that handles the **double-escaped HTML** (`&amp;lt;p&amp;gt;`).
-- [ ] Fetcher: handle the `"QNR"` transcript type.
-- [ ] Embed via polymorphic embeddings (`source_type='written'`).
+### 3C. QNR  *(DONE)*
+- [x] Schema: `written_contributions` — **no `Contribution_ID` in the feed**, so synthetic
+      `(meeting_id, order_index)` key; `qa_role` question|answer; deterministic positional
+      `pair_id`; `speaker_id` nullable (**answers attributed by job title, no `Member_Id`**).
+- [x] `parse_qnr_xml` + clean step handling the **double-escaped HTML** (`&amp;lt;p&amp;gt;`).
+- [x] Fetcher: handle the `"QNR"` transcript type.
+- → Embed via polymorphic embeddings (`source_type='written'`): **moved to Phase 4.**
 
-### 3D. Late-publication sync  *(cross-cutting — without this, Votes/QNR never attach)*
-- [ ] `SyncCheckpoint` is a single global date and won't revisit already-ingested meetings.
-      Add **per-artifact tracking** *or* a **trailing re-scan window** (~last 30 days) for
-      `Votes`/`QNR` so they get attached after the transcript was processed.
+### 3D. Late-publication sync  *(DONE)*
+- [x] `artifact_watch` table: a transcript ingest opens pending votes/qnr watches with a
+      deadline = `meeting_date + ARTIFACT_WATCH_DAYS` (default 14). Each incremental run sweeps
+      pending watches, attaching any now-available artifact idempotently and **expiring stale
+      ones silently** — availability is *structural* (most plenary days never get Votes/QNR),
+      so a forward-only cursor would block forever. Sweep uses the portal's default listing
+      (date-param URLs return a linkless page). Verified end-to-end against the live portal.
 
 ---
 
-## Phase 4 — Vote/QNR tools + query-strategy hardening
+## Phase 4 — Vote/QNR embedding + tools + query-strategy hardening
 
+- [ ] **Embedding (moved from Phase 3):** generalise the embedding pipeline to embed
+      `written_contributions` (`source_type='written'`) and `vote_name_english`
+      (`source_type='vote'`); make `semantic_search` span those sources (resolving each
+      source's citation metadata) behind a `source` filter (spoken | written | vote).
+      Re-run the eval harness afterwards to confirm no speech regression.
+- [ ] **Purge-procedure cascade mitigation:** the generic `source_id` carries no FK, so add
+      explicit non-speech embedding cleanup on reprocess to `purge_*` (needed once non-speech
+      vectors exist).
 - [ ] Tools: `get_vote`, `find_votes`, `get_member_voting_record`, `get_votes_for_speech`
-      (rhetoric↔vote bridge via `contribution_id`); `get_written_answers`; `search_speeches`
-      gains a `source` filter (spoken | written).
+      (rhetoric↔vote bridge via `contribution_id`); `get_written_answers`.
 - [ ] Prompts: `stance-vs-vote`, `issue-briefing`, `compare-speakers`.
 - [ ] Iterate the search strategy against the eval harness.
 - [ ] **Only if eval shows recall gaps:** add server-side multi-query fusion (RRF) or HyDE
