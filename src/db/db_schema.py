@@ -263,6 +263,129 @@ class SpeechEmbedding(Base):
 
     speech = relationship("Speech", back_populates="embeddings")
 
+    __table_args__ = (
+        Index(
+            "ix_speech_embeddings_source",
+            "source_type", "source_id", "model_name",
+        ),
+    )
+
+
+class VoteResultEnum(enum.Enum):
+    """Per-member outcome on a recorded vote.
+
+    Four values, not three: the source lists every member per vote, so
+    ``DidNotVote`` distinguishes a registered absence/non-participation from a
+    cast abstention. Only For/Against/Abstain feed the printed tallies.
+    """
+    FOR = "For"
+    AGAINST = "Against"
+    ABSTAIN = "Abstain"
+    DID_NOT_VOTE = "DidNotVote"
+
+
+class Vote(Base):
+    """Motion-level recorded vote.
+
+    Natural key is ``contribution_id`` (the motion contribution in the
+    transcript), giving the rhetoric↔vote bridge. The source repeats motion-level
+    fields on every member row; this table holds the deduplicated motion.
+    """
+    __tablename__ = "votes"
+
+    vote_id = Column(Integer, primary_key=True, autoincrement=True)
+    contribution_id = Column(
+        Integer,
+        ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    assembly = Column(Integer)
+
+    agenda_item_id = Column(String(100))
+    agenda_item_english = Column(String(500))
+    agenda_item_welsh = Column(String(500))
+
+    vote_name_english = Column(Text)
+    vote_name_welsh = Column(Text)
+
+    total_for = Column(Integer)
+    total_against = Column(Integer)
+    total_abstain = Column(Integer)
+
+    result_english = Column(String(255))
+    result_welsh = Column(String(255))
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    meeting = relationship("Meeting")
+    records = relationship("VoteRecord", back_populates="vote", cascade="all, delete-orphan")
+
+
+class VoteRecord(Base):
+    """How a single member voted on a single motion."""
+    __tablename__ = "vote_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vote_id = Column(Integer, ForeignKey("votes.vote_id", ondelete="CASCADE"), nullable=False, index=True)
+    member_id = Column(Integer, ForeignKey("members.member_id", ondelete="CASCADE"), nullable=False, index=True)
+    result = Column(Enum(VoteResultEnum), nullable=False)
+
+    vote = relationship("Vote", back_populates="records")
+
+    __table_args__ = (
+        UniqueConstraint("vote_id", "member_id", name="uq_vote_member"),
+    )
+
+
+class QaRoleEnum(enum.Enum):
+    """Role of a written contribution within a Q&A pair."""
+    QUESTION = "question"
+    ANSWER = "answer"
+
+
+class WrittenContribution(Base):
+    """Written question/answer not reached in the chamber (QNR feed).
+
+    The QNR source carries **no** ``Contribution_ID``, so the row key is the
+    synthetic ``(meeting_id, order_index)`` (document order, assigned by the
+    parser — the source's ``Contribution_Order_ID`` is not unique). Questions and
+    answers are paired positionally via ``pair_id`` (a deterministic
+    ``"<meeting_id>-<n>"`` string so re-ingest is idempotent). Answers are
+    attributed by job title only — they have no ``Member_Id``, so ``speaker_id``
+    is nullable.
+    """
+    __tablename__ = "written_contributions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    assembly = Column(Integer)
+    order_index = Column(Integer, nullable=False)
+
+    agenda_item_id = Column(String(100))
+    agenda_item_english = Column(String(500))
+    agenda_item_welsh = Column(String(500))
+
+    qa_role = Column(Enum(QaRoleEnum), nullable=False)
+    pair_id = Column(String(50), index=True)
+
+    speaker_id = Column(Integer, ForeignKey("members.member_id", ondelete="SET NULL"), nullable=True)
+    speaker_name_english = Column(String(255))
+    speaker_job_title_english = Column(String(255))
+    speaker_job_title_welsh = Column(String(255))
+
+    text_english = Column(Text)
+    text_welsh = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    meeting = relationship("Meeting")
+
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "order_index", name="uq_written_meeting_order"),
+    )
+
 
 class SyncCheckpoint(Base):
     """Track incremental sync progress for resumability."""

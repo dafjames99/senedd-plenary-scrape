@@ -13,11 +13,12 @@ from alembic.config import Config
 from src.db.db_schema import (
     Meeting, Member, MemberJobTitle, RawContribution, CleanContribution,
     ClassifiedContribution, Speech, SpeechPart, ProceduralEvent,
-    RowTypeEnum, SyncCheckpoint, OralQuestion
+    RowTypeEnum, SyncCheckpoint, OralQuestion, Vote, VoteRecord, VoteResultEnum,
+    WrittenContribution, QaRoleEnum
 )
 from src.db.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
 from src.db.fetcher import DataFetcher
-from src.db.parser import parse_senedd_xml
+from src.db.parser import parse_senedd_xml, parse_votes_xml, parse_qnr_xml
 import logging
 
 logger = logging.getLogger(__name__)
@@ -122,6 +123,142 @@ class SeneddPipeline:
         return len(contributions_list)
 
     
+    def ingest_votes(self, session: Session, xml_file: Path) -> int:
+        """Ingest a Plenary *Votes* XML export into ``votes`` + ``vote_records``.
+
+        Designed to run *after* the meeting's transcript so the motion
+        ``contribution_id`` and most members already exist. It is defensive
+        regardless: it never clobbers the shared ``meetings`` row, upserts any
+        member it hasn't seen, and skips (with a warning) any vote whose motion
+        contribution is not yet present — those are retried idempotently once the
+        transcript lands. Returns the number of vote_records written.
+        """
+        logger.info("Ingesting Votes payload from: %s", xml_file)
+        meeting_data, votes, vote_records, members = parse_votes_xml(xml_file)
+        if not meeting_data or not votes:
+            logger.warning("No votes parsed from %s; nothing to ingest.", xml_file)
+            return 0
+
+        # Ensure the meeting exists without overwriting the transcript's metadata
+        # (the meeting row is shared; meeting_type must stay 'plenary').
+        session.execute(
+            insert(Meeting).values(**meeting_data).on_conflict_do_nothing(index_elements=["meeting_id"])
+        )
+
+        # Defensive member upsert — a member may vote without ever having spoken.
+        if members:
+            session.execute(
+                insert(Member).values(members).on_conflict_do_nothing(index_elements=["member_id"])
+            )
+        session.flush()
+
+        # Only ingest votes whose motion contribution is already present; the FK
+        # would otherwise hard-fail. Missing ones are picked up on a later pass.
+        candidate_cids = [v["contribution_id"] for v in votes]
+        existing_cids = {
+            row[0] for row in session.query(RawContribution.contribution_id)
+            .filter(RawContribution.contribution_id.in_(candidate_cids)).all()
+        }
+        ready_votes = [v for v in votes if v["contribution_id"] in existing_cids]
+        skipped = [v["contribution_id"] for v in votes if v["contribution_id"] not in existing_cids]
+        if skipped:
+            logger.warning(
+                "Deferring %d vote(s) whose motion contribution is not yet ingested: %s",
+                len(skipped), skipped,
+            )
+        if not ready_votes:
+            return 0
+
+        session.execute(
+            insert(Vote).values(ready_votes).on_conflict_do_nothing(index_elements=["contribution_id"])
+        )
+        session.flush()
+
+        # Map motion contribution_id -> assigned vote_id (covers both freshly
+        # inserted and pre-existing votes).
+        cid_to_vote_id = {
+            cid: vid for vid, cid in session.query(Vote.vote_id, Vote.contribution_id)
+            .filter(Vote.contribution_id.in_([v["contribution_id"] for v in ready_votes])).all()
+        }
+
+        record_rows = []
+        for rec in vote_records:
+            vote_id = cid_to_vote_id.get(rec["contribution_id"])
+            if vote_id is None:
+                continue  # belonged to a deferred vote
+            try:
+                result_enum = VoteResultEnum(rec["result"])
+            except ValueError:
+                logger.warning("Unknown vote result %r; skipping record.", rec["result"])
+                continue
+            record_rows.append({
+                "vote_id": vote_id,
+                "member_id": rec["member_id"],
+                "result": result_enum,
+            })
+
+        if record_rows:
+            session.execute(
+                insert(VoteRecord).values(record_rows)
+                .on_conflict_do_nothing(index_elements=["vote_id", "member_id"])
+            )
+            session.flush()
+
+        logger.info(
+            "Votes ingest complete: %d motions, %d member records.",
+            len(ready_votes), len(record_rows),
+        )
+        return len(record_rows)
+
+    def ingest_qnr(self, session: Session, xml_file: Path) -> int:
+        """Ingest a Plenary *QNR* export into ``written_contributions``.
+
+        The QNR feed has no ``Contribution_ID`` and no clean FK to
+        ``raw_contributions``, so this is independent of the transcript apart from
+        the shared meeting row (which is never clobbered). Text is double-escaped
+        HTML; it is decoded and tag-stripped here via ``clean_contribution_verbatim``.
+        Idempotent on the synthetic ``(meeting_id, order_index)`` key.
+        Returns the number of written contributions written.
+        """
+        logger.info("Ingesting QNR payload from: %s", xml_file)
+        meeting_data, written, members = parse_qnr_xml(xml_file)
+        if not meeting_data or not written:
+            logger.warning("No QNR rows parsed from %s; nothing to ingest.", xml_file)
+            return 0
+
+        session.execute(
+            insert(Meeting).values(**meeting_data).on_conflict_do_nothing(index_elements=["meeting_id"])
+        )
+        if members:
+            session.execute(
+                insert(Member).values(members).on_conflict_do_nothing(index_elements=["member_id"])
+            )
+        session.flush()
+
+        rows = []
+        for w in written:
+            verbatim = w.pop("raw_verbatim")
+            translated = w.pop("raw_translated")
+            english = clean_contribution_verbatim(translated) or clean_contribution_verbatim(verbatim)
+            # Only keep a Welsh field when the verbatim genuinely differs from the
+            # English translation (answers are English-only, duplicated across both).
+            welsh = clean_contribution_verbatim(verbatim) if verbatim and verbatim != translated else None
+            rows.append({
+                **w,
+                "qa_role": QaRoleEnum(w["qa_role"]),
+                "text_english": english,
+                "text_welsh": welsh,
+            })
+
+        session.execute(
+            insert(WrittenContribution).values(rows)
+            .on_conflict_do_nothing(index_elements=["meeting_id", "order_index"])
+        )
+        session.flush()
+
+        logger.info("QNR ingest complete: %d written contributions.", len(rows))
+        return len(rows)
+
     def process_and_classify_contributions(self, session: Session, meeting_id: Optional[int] = None):
         """Combines text cleaning, metadata extraction, and row classification 
 
