@@ -19,21 +19,32 @@ the corpus was embedded with (currently `ollama/embeddinggemma:300m` locally).
 
 ## Register with a client (stdio)
 
-Claude Code (`.mcp.json` in the project, or `claude mcp add`):
+Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`)
+or Claude Code (`.mcp.json` / `claude mcp add`):
 
 ```json
 {
   "mcpServers": {
     "senedd": {
-      "command": "uv",
-      "args": ["run", "python", "-m", "src.mcp_server"],
-      "cwd": "/absolute/path/to/senedd-scrape"
+      "command": "/opt/homebrew/bin/uv",
+      "args": [
+        "run", "--directory", "/absolute/path/to/senedd-scrape",
+        "python", "-m", "src.mcp_server"
+      ]
     }
   }
 }
 ```
 
-Claude Desktop uses the same shape under `mcpServers` in its config file.
+Two things that matter for GUI clients (Claude Desktop):
+
+- **Absolute path to `uv`** — GUI apps don't inherit your shell `PATH`, so a bare
+  `"uv"` fails with "command not found". Find yours with `which uv`.
+- **`uv run --directory <project>`, not `cwd`** — Desktop does not reliably honour
+  a `cwd` field, so `uv` would otherwise start in the wrong directory and use
+  system Python (you'll see `ModuleNotFoundError: No module named 'src'`).
+  `--directory` makes uv use the project's venv and root regardless of where it
+  was launched.
 
 ## Tools
 
