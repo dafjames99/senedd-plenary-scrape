@@ -70,10 +70,21 @@ Two things that matter for GUI clients (Claude Desktop):
 - `senedd_search_strategy` — how to answer a question with filters + citations
 - `senedd_position_over_time` — trace one member's evolving stance on an issue
 
+**Prompts are NOT tools.** The model cannot invoke them — they are templates the
+*user* selects in the client UI (in Claude Desktop, via the "+"/attachments menu).
+Asking the model in chat to "use senedd_position_over_time" won't work; it has no
+such tool. The always-on guidance instead lives in the server `instructions`
+(advertised at connect time), so the model gets the core strategy by default.
+
 ## Notes / follow-ups
 
+- Tool inputs are **flat** (e.g. `{"speech_id": 496}`), not wrapped in a `params`
+  object — a model passing flat args is what every client does naturally.
 - Outputs are JSON (the consumer is an LLM that must cite exact `speech_id`s and
   URLs). Listings carry excerpts; fetch full text with `senedd_get_speech`.
+- The corpus is public record under the **Open Government Licence v3.0**; the
+  server surfaces this (instructions, data-dictionary, corpus-stats) so the model
+  knows verbatim quotation is permitted with attribution.
 - Each call currently constructs a DB engine via the service layer. Fine for
   local single-user stdio use; **centralise connection pooling before deploying
   the HTTP transport** for multiple clients.
