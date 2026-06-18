@@ -150,21 +150,39 @@ class DataFetcher:
         return new_meetings
 
     
-    def download_file(self, meeting: Meeting, save_dir: Path) -> Optional[Path]:
+    # Map a portal transcript type to the filename suffix used on disk.
+    _SUFFIX_BY_TYPE = {
+        "BilingualTranscript": "Bilingual",
+        "WelshTranscript": "Welsh",
+        "EnglishTranscript": "English",
+        "Votes": "Votes",
+        "QNR": "QNR",
+    }
+
+    def download_file(
+        self,
+        meeting: Meeting,
+        save_dir: Path,
+        transcript_type: str = "BilingualTranscript",
+    ) -> Optional[Path]:
         """
         Download XML file for a meeting.
-        
+
         Args:
             meeting: Meeting object with download URL
             save_dir: Directory to save the file
-        
+            transcript_type: Artifact type being fetched; determines the filename
+                suffix so Votes/QNR don't collide with (or overwrite) the
+                transcript's ``_Bilingual.xml``.
+
         Returns:
             Path to saved file, or None if download failed
         """
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
-        
-        filename = f"{meeting.meeting_date.strftime('%Y%m%d')}_{meeting.meeting_type}_Bilingual.xml"
+
+        suffix = self._SUFFIX_BY_TYPE.get(transcript_type, "Bilingual")
+        filename = f"{meeting.meeting_date.strftime('%Y%m%d')}_{meeting.meeting_type}_{suffix}.xml"
         file_path = save_dir / filename
         
         # Skip if already downloaded

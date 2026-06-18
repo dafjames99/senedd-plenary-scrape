@@ -387,6 +387,31 @@ class WrittenContribution(Base):
     )
 
 
+class ArtifactWatch(Base):
+    """Pending late-publication Votes/QNR artifacts for an ingested meeting.
+
+    Votes/QNR share the transcript's ``meeting_id`` and publish 0–2 days later
+    (or never), so the global ``SyncCheckpoint`` cursor never revisits the
+    meeting to attach them. One watch row per (meeting, artifact_type) drives a
+    bounded daily re-check that expires silently at ``deadline`` — handling the
+    common case where the artifact is simply never published.
+    """
+    __tablename__ = "artifact_watch"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact_type = Column(String(20), nullable=False)  # 'votes' | 'qnr'
+    status = Column(String(20), nullable=False, server_default="pending")  # pending | done | expired
+    deadline = Column(DateTime, nullable=False)
+    last_checked = Column(DateTime)
+    attempts = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "artifact_type", name="uq_watch_meeting_artifact"),
+    )
+
+
 class SyncCheckpoint(Base):
     """Track incremental sync progress for resumability."""
     __tablename__ = "sync_checkpoints"

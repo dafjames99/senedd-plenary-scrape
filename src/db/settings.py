@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     hf_token: Optional[str] = Field(default=None, alias="HF_TOKEN")
     openai_api_key: Optional[str] = Field(default = None, alias = "OPENAI_API_KEY")
     embed_batch_size: Optional[int] = Field(default = 250, alias = "EMBED_BATCH_SIZE")
+
+    # --- Late-publication artifact watch (Votes/QNR) ---
+    # Votes/QNR publish 0–2 days after the transcript (often never, when a session
+    # held no votes / had no unreached written questions). After ingesting a
+    # transcript we re-check the portal for these artifacts until this many days
+    # past the meeting, then give up silently.
+    artifact_watch_days: int = Field(default=14, alias="ARTIFACT_WATCH_DAYS")
     # secret_key: str = Field(default="your_secret_key_here", alias="SECRET_KEY") #UNUSED
 
     # --- Runtime Flags & Controls ---
