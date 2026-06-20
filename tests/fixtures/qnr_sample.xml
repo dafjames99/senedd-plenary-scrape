@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<dataroot generated="2026-06-03T18:00:08">
+  <XML_Plenary_QNR_Bilingual>
+    <Meeting_ID>16060</Meeting_ID>
+    <Assembly>7</Assembly>
+    <MeetingDate>2026-06-02T13:30:00</MeetingDate>
+    <Contribution_Order_ID>0</Contribution_Order_ID>
+    <Agenda_Item_ID>260602-QNR</Agenda_Item_ID>
+    <Agenda_item_welsh>Cwestiynau i Prif Weinidog Cymru</Agenda_item_welsh>
+    <Agenda_item_english>Questions to the First Minister</Agenda_item_english>
+    <contribution_type>QNR</contribution_type>
+    <contribution_verbatim>Pa gamau fydd y Llywodraeth yn eu cymryd?</contribution_verbatim>
+    <contribution_translated>What steps will the Government take?</contribution_translated>
+    <Member_Id>12183</Member_Id>
+    <Member_name_English>Tom Montgomery</Member_name_English>
+    <Member_sortcode>Montgomery, Tom</Member_sortcode>
+    <Member_biog_English>https://business.senedd.wales/mgUserInfo.aspx?UID=12183</Member_biog_English>
+    <Member_biog_Welsh>https://busnes.senedd.cymru/mgUserInfo.aspx?UID=12183</Member_biog_Welsh>
+  </XML_Plenary_QNR_Bilingual>
+  <XML_Plenary_QNR_Bilingual>
+    <Meeting_ID>16060</Meeting_ID>
+    <Assembly>7</Assembly>
+    <MeetingDate>2026-06-02T13:30:00</MeetingDate>
+    <Contribution_Order_ID>1</Contribution_Order_ID>
+    <Agenda_Item_ID>260602-QNR</Agenda_Item_ID>
+    <Agenda_item_welsh>Cwestiynau i Prif Weinidog Cymru</Agenda_item_welsh>
+    <Agenda_item_english>Questions to the First Minister</Agenda_item_english>
+    <contribution_type>ANR</contribution_type>
+    <contribution_verbatim>&amp;lt;p&amp;gt;We recognise the financial pressures faced by local government.&amp;lt;/p&amp;gt;</contribution_verbatim>
+    <contribution_translated>&amp;lt;p&amp;gt;We recognise the financial pressures faced by local government.&amp;lt;/p&amp;gt;</contribution_translated>
+    <Member_job_title_Welsh>Prif Weinidog Cymru</Member_job_title_Welsh>
+    <Member_job_title_English>First Minister</Member_job_title_English>
+  </XML_Plenary_QNR_Bilingual>
+  <XML_Plenary_QNR_Bilingual>
+    <Meeting_ID>16060</Meeting_ID>
+    <Assembly>7</Assembly>
+    <MeetingDate>2026-06-02T13:30:00</MeetingDate>
+    <Contribution_Order_ID>1</Contribution_Order_ID>
+    <Agenda_Item_ID>260602-QNR</Agenda_Item_ID>
+    <Agenda_item_welsh>Cwestiynau i Prif Weinidog Cymru</Agenda_item_welsh>
+    <Agenda_item_english>Questions to the First Minister</Agenda_item_english>
+    <contribution_type>QNR</contribution_type>
+    <contribution_verbatim>Pa drafodaethau y mae Llywodraeth Cymru wedi'u cael?</contribution_verbatim>
+    <contribution_translated>What discussions has the Welsh Government had?</contribution_translated>
+    <Member_Id>8696</Member_Id>
+    <Member_name_English>Steve Bayliss</Member_name_English>
+    <Member_sortcode>Bayliss, Steve</Member_sortcode>
+    <Member_biog_English>https://business.senedd.wales/mgUserInfo.aspx?UID=8696</Member_biog_English>
+    <Member_biog_Welsh>https://busnes.senedd.cymru/mgUserInfo.aspx?UID=8696</Member_biog_Welsh>
+  </XML_Plenary_QNR_Bilingual>
+  <XML_Plenary_QNR_Bilingual>
+    <Meeting_ID>16060</Meeting_ID>
+    <Assembly>7</Assembly>
+    <MeetingDate>2026-06-02T13:30:00</MeetingDate>
+    <Contribution_Order_ID>2</Contribution_Order_ID>
+    <Agenda_Item_ID>260602-QNR</Agenda_Item_ID>
+    <Agenda_item_welsh>Cwestiynau i Prif Weinidog Cymru</Agenda_item_welsh>
+    <Agenda_item_english>Questions to the First Minister</Agenda_item_english>
+    <contribution_type>ANR</contribution_type>
+    <contribution_verbatim>&amp;lt;p&amp;gt;The Welsh Government has no plans for cashless services.&amp;lt;/p&amp;gt;</contribution_verbatim>
+    <contribution_translated>&amp;lt;p&amp;gt;The Welsh Government has no plans for cashless services.&amp;lt;/p&amp;gt;</contribution_translated>
+    <Member_job_title_Welsh>Prif Weinidog Cymru</Member_job_title_Welsh>
+    <Member_job_title_English>First Minister</Member_job_title_English>
+  </XML_Plenary_QNR_Bilingual>
+</dataroot>

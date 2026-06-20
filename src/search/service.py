@@ -86,7 +86,13 @@ def semantic_search(
     # value is bound separately to avoid any injection risk. The model_name
     # predicate is always present, so the join order below is unchanged when no
     # optional filters are supplied.
-    conditions = ["se.model_name = :model_name"]
+    conditions = [
+        "se.model_name = :model_name",
+        # Polymorphic embeddings: this query path resolves spoken-speech metadata,
+        # so restrict to speech-sourced vectors. Written/vote sources are served by
+        # their own resolution joins (Phase 3C+); the discriminator lives here.
+        "se.source_type = 'speech'",
+    ]
     params: dict = {
         "query_embedding": str(query_vector),
         "model_name": provider.model_name,
@@ -105,8 +111,6 @@ def semantic_search(
     if agenda_item:
         conditions.append("s.agenda_item_id = :agenda_item")
         params["agenda_item"] = agenda_item
-    # Future (Phase 3): a source_type predicate slots in here once embeddings are
-    # polymorphic across spoken speeches and written QNR.
     where_clause = " AND ".join(conditions)
 
     # CTE ranks all chunks within each speech by cosine distance, then the outer
@@ -127,7 +131,7 @@ def semantic_search(
                     ORDER BY se.embedding_vector <=> :query_embedding ASC
                 ) AS rn
             FROM  speech_embeddings se
-            JOIN  speeches s  ON se.speech_id = s.speech_id
+            JOIN  speeches s  ON se.source_id = s.speech_id
             JOIN  meetings m  ON s.meeting_id  = m.meeting_id
             WHERE {where_clause}
         ),

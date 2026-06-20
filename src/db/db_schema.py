@@ -1,5 +1,5 @@
 """SQLAlchemy models for Senedd speech pipeline."""
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, event, text
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, Index, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -231,11 +231,30 @@ class ProceduralEvent(Base):
 
 
 class SpeechEmbedding(Base):
-    """Vector embeddings for speeches (future layer)."""
+    """Polymorphic vector embeddings over any retrievable text source.
+
+    Historically speech-only; generalised in Phase 3 so one semantic search can
+    span spoken speeches and written QNR Q&A. The canonical discriminator is the
+    ``(source_type, source_id)`` pair — new code keys on it exclusively. The
+    legacy ``speech_id`` column (and its cascade FK) is retained for one release
+    as a rollback safety net for the populated gemma corpus and will be dropped
+    in a follow-up migration; until then speech rows populate both it and
+    ``source_id``. Because the generic ``source_id`` carries no FK, cleanup of
+    non-speech embeddings on reprocess/purge is handled explicitly in the
+    pipeline and the ``purge_*`` SQL procedures.
+    """
     __tablename__ = "speech_embeddings"
 
     embedding_id = Column(Integer, primary_key=True, autoincrement=True)
-    speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=False)
+
+    # Polymorphic discriminator: 'speech' | 'written' | 'vote'.
+    source_type = Column(String(20), nullable=False, server_default="speech")
+    source_id = Column(Integer, nullable=False)
+
+    # Legacy speech FK — nullable now; cascade still protects speech rows during
+    # the keep-then-drop window. NULL for non-speech sources.
+    speech_id = Column(Integer, ForeignKey("speeches.speech_id", ondelete="CASCADE"), nullable=True)
+
     chunk_index = Column(Integer)
     chunk_text = Column(Text)
     embedding_vector = Column(Vector)
@@ -243,6 +262,154 @@ class SpeechEmbedding(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     speech = relationship("Speech", back_populates="embeddings")
+
+    __table_args__ = (
+        Index(
+            "ix_speech_embeddings_source",
+            "source_type", "source_id", "model_name",
+        ),
+    )
+
+
+class VoteResultEnum(enum.Enum):
+    """Per-member outcome on a recorded vote.
+
+    Four values, not three: the source lists every member per vote, so
+    ``DidNotVote`` distinguishes a registered absence/non-participation from a
+    cast abstention. Only For/Against/Abstain feed the printed tallies.
+    """
+    FOR = "For"
+    AGAINST = "Against"
+    ABSTAIN = "Abstain"
+    DID_NOT_VOTE = "DidNotVote"
+
+
+class Vote(Base):
+    """Motion-level recorded vote.
+
+    Natural key is ``contribution_id`` (the motion contribution in the
+    transcript), giving the rhetoric↔vote bridge. The source repeats motion-level
+    fields on every member row; this table holds the deduplicated motion.
+    """
+    __tablename__ = "votes"
+
+    vote_id = Column(Integer, primary_key=True, autoincrement=True)
+    contribution_id = Column(
+        Integer,
+        ForeignKey("raw_contributions.contribution_id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    assembly = Column(Integer)
+
+    agenda_item_id = Column(String(100))
+    agenda_item_english = Column(String(500))
+    agenda_item_welsh = Column(String(500))
+
+    vote_name_english = Column(Text)
+    vote_name_welsh = Column(Text)
+
+    total_for = Column(Integer)
+    total_against = Column(Integer)
+    total_abstain = Column(Integer)
+
+    result_english = Column(String(255))
+    result_welsh = Column(String(255))
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    meeting = relationship("Meeting")
+    records = relationship("VoteRecord", back_populates="vote", cascade="all, delete-orphan")
+
+
+class VoteRecord(Base):
+    """How a single member voted on a single motion."""
+    __tablename__ = "vote_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vote_id = Column(Integer, ForeignKey("votes.vote_id", ondelete="CASCADE"), nullable=False, index=True)
+    member_id = Column(Integer, ForeignKey("members.member_id", ondelete="CASCADE"), nullable=False, index=True)
+    result = Column(Enum(VoteResultEnum), nullable=False)
+
+    vote = relationship("Vote", back_populates="records")
+
+    __table_args__ = (
+        UniqueConstraint("vote_id", "member_id", name="uq_vote_member"),
+    )
+
+
+class QaRoleEnum(enum.Enum):
+    """Role of a written contribution within a Q&A pair."""
+    QUESTION = "question"
+    ANSWER = "answer"
+
+
+class WrittenContribution(Base):
+    """Written question/answer not reached in the chamber (QNR feed).
+
+    The QNR source carries **no** ``Contribution_ID``, so the row key is the
+    synthetic ``(meeting_id, order_index)`` (document order, assigned by the
+    parser — the source's ``Contribution_Order_ID`` is not unique). Questions and
+    answers are paired positionally via ``pair_id`` (a deterministic
+    ``"<meeting_id>-<n>"`` string so re-ingest is idempotent). Answers are
+    attributed by job title only — they have no ``Member_Id``, so ``speaker_id``
+    is nullable.
+    """
+    __tablename__ = "written_contributions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    assembly = Column(Integer)
+    order_index = Column(Integer, nullable=False)
+
+    agenda_item_id = Column(String(100))
+    agenda_item_english = Column(String(500))
+    agenda_item_welsh = Column(String(500))
+
+    qa_role = Column(Enum(QaRoleEnum), nullable=False)
+    pair_id = Column(String(50), index=True)
+
+    speaker_id = Column(Integer, ForeignKey("members.member_id", ondelete="SET NULL"), nullable=True)
+    speaker_name_english = Column(String(255))
+    speaker_job_title_english = Column(String(255))
+    speaker_job_title_welsh = Column(String(255))
+
+    text_english = Column(Text)
+    text_welsh = Column(Text)
+
+    created_at = Column(DateTime, default=datetime.now)
+
+    meeting = relationship("Meeting")
+
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "order_index", name="uq_written_meeting_order"),
+    )
+
+
+class ArtifactWatch(Base):
+    """Pending late-publication Votes/QNR artifacts for an ingested meeting.
+
+    Votes/QNR share the transcript's ``meeting_id`` and publish 0–2 days later
+    (or never), so the global ``SyncCheckpoint`` cursor never revisits the
+    meeting to attach them. One watch row per (meeting, artifact_type) drives a
+    bounded daily re-check that expires silently at ``deadline`` — handling the
+    common case where the artifact is simply never published.
+    """
+    __tablename__ = "artifact_watch"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    meeting_id = Column(Integer, ForeignKey("meetings.meeting_id", ondelete="CASCADE"), nullable=False, index=True)
+    artifact_type = Column(String(20), nullable=False)  # 'votes' | 'qnr'
+    status = Column(String(20), nullable=False, server_default="pending")  # pending | done | expired
+    deadline = Column(DateTime, nullable=False)
+    last_checked = Column(DateTime)
+    attempts = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("meeting_id", "artifact_type", name="uq_watch_meeting_artifact"),
+    )
 
 
 class SyncCheckpoint(Base):

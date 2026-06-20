@@ -2,7 +2,7 @@
 import os
 import argparse
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Optional, List
 from sqlalchemy import create_engine, text, func
 from sqlalchemy.orm import sessionmaker, Session
@@ -13,11 +13,13 @@ from alembic.config import Config
 from src.db.db_schema import (
     Meeting, Member, MemberJobTitle, RawContribution, CleanContribution,
     ClassifiedContribution, Speech, SpeechPart, ProceduralEvent,
-    RowTypeEnum, SyncCheckpoint, OralQuestion
+    RowTypeEnum, SyncCheckpoint, OralQuestion, Vote, VoteRecord, VoteResultEnum,
+    WrittenContribution, QaRoleEnum, ArtifactWatch
 )
 from src.db.transformers import classify_contribution, clean_contribution_verbatim, parse_oral_question_meta
 from src.db.fetcher import DataFetcher
-from src.db.parser import parse_senedd_xml
+from src.db.parser import parse_senedd_xml, parse_votes_xml, parse_qnr_xml
+from src.db.settings import settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -122,6 +124,142 @@ class SeneddPipeline:
         return len(contributions_list)
 
     
+    def ingest_votes(self, session: Session, xml_file: Path) -> int:
+        """Ingest a Plenary *Votes* XML export into ``votes`` + ``vote_records``.
+
+        Designed to run *after* the meeting's transcript so the motion
+        ``contribution_id`` and most members already exist. It is defensive
+        regardless: it never clobbers the shared ``meetings`` row, upserts any
+        member it hasn't seen, and skips (with a warning) any vote whose motion
+        contribution is not yet present — those are retried idempotently once the
+        transcript lands. Returns the number of vote_records written.
+        """
+        logger.info("Ingesting Votes payload from: %s", xml_file)
+        meeting_data, votes, vote_records, members = parse_votes_xml(xml_file)
+        if not meeting_data or not votes:
+            logger.warning("No votes parsed from %s; nothing to ingest.", xml_file)
+            return 0
+
+        # Ensure the meeting exists without overwriting the transcript's metadata
+        # (the meeting row is shared; meeting_type must stay 'plenary').
+        session.execute(
+            insert(Meeting).values(**meeting_data).on_conflict_do_nothing(index_elements=["meeting_id"])
+        )
+
+        # Defensive member upsert — a member may vote without ever having spoken.
+        if members:
+            session.execute(
+                insert(Member).values(members).on_conflict_do_nothing(index_elements=["member_id"])
+            )
+        session.flush()
+
+        # Only ingest votes whose motion contribution is already present; the FK
+        # would otherwise hard-fail. Missing ones are picked up on a later pass.
+        candidate_cids = [v["contribution_id"] for v in votes]
+        existing_cids = {
+            row[0] for row in session.query(RawContribution.contribution_id)
+            .filter(RawContribution.contribution_id.in_(candidate_cids)).all()
+        }
+        ready_votes = [v for v in votes if v["contribution_id"] in existing_cids]
+        skipped = [v["contribution_id"] for v in votes if v["contribution_id"] not in existing_cids]
+        if skipped:
+            logger.warning(
+                "Deferring %d vote(s) whose motion contribution is not yet ingested: %s",
+                len(skipped), skipped,
+            )
+        if not ready_votes:
+            return 0
+
+        session.execute(
+            insert(Vote).values(ready_votes).on_conflict_do_nothing(index_elements=["contribution_id"])
+        )
+        session.flush()
+
+        # Map motion contribution_id -> assigned vote_id (covers both freshly
+        # inserted and pre-existing votes).
+        cid_to_vote_id = {
+            cid: vid for vid, cid in session.query(Vote.vote_id, Vote.contribution_id)
+            .filter(Vote.contribution_id.in_([v["contribution_id"] for v in ready_votes])).all()
+        }
+
+        record_rows = []
+        for rec in vote_records:
+            vote_id = cid_to_vote_id.get(rec["contribution_id"])
+            if vote_id is None:
+                continue  # belonged to a deferred vote
+            try:
+                result_enum = VoteResultEnum(rec["result"])
+            except ValueError:
+                logger.warning("Unknown vote result %r; skipping record.", rec["result"])
+                continue
+            record_rows.append({
+                "vote_id": vote_id,
+                "member_id": rec["member_id"],
+                "result": result_enum,
+            })
+
+        if record_rows:
+            session.execute(
+                insert(VoteRecord).values(record_rows)
+                .on_conflict_do_nothing(index_elements=["vote_id", "member_id"])
+            )
+            session.flush()
+
+        logger.info(
+            "Votes ingest complete: %d motions, %d member records.",
+            len(ready_votes), len(record_rows),
+        )
+        return len(record_rows)
+
+    def ingest_qnr(self, session: Session, xml_file: Path) -> int:
+        """Ingest a Plenary *QNR* export into ``written_contributions``.
+
+        The QNR feed has no ``Contribution_ID`` and no clean FK to
+        ``raw_contributions``, so this is independent of the transcript apart from
+        the shared meeting row (which is never clobbered). Text is double-escaped
+        HTML; it is decoded and tag-stripped here via ``clean_contribution_verbatim``.
+        Idempotent on the synthetic ``(meeting_id, order_index)`` key.
+        Returns the number of written contributions written.
+        """
+        logger.info("Ingesting QNR payload from: %s", xml_file)
+        meeting_data, written, members = parse_qnr_xml(xml_file)
+        if not meeting_data or not written:
+            logger.warning("No QNR rows parsed from %s; nothing to ingest.", xml_file)
+            return 0
+
+        session.execute(
+            insert(Meeting).values(**meeting_data).on_conflict_do_nothing(index_elements=["meeting_id"])
+        )
+        if members:
+            session.execute(
+                insert(Member).values(members).on_conflict_do_nothing(index_elements=["member_id"])
+            )
+        session.flush()
+
+        rows = []
+        for w in written:
+            verbatim = w.pop("raw_verbatim")
+            translated = w.pop("raw_translated")
+            english = clean_contribution_verbatim(translated) or clean_contribution_verbatim(verbatim)
+            # Only keep a Welsh field when the verbatim genuinely differs from the
+            # English translation (answers are English-only, duplicated across both).
+            welsh = clean_contribution_verbatim(verbatim) if verbatim and verbatim != translated else None
+            rows.append({
+                **w,
+                "qa_role": QaRoleEnum(w["qa_role"]),
+                "text_english": english,
+                "text_welsh": welsh,
+            })
+
+        session.execute(
+            insert(WrittenContribution).values(rows)
+            .on_conflict_do_nothing(index_elements=["meeting_id", "order_index"])
+        )
+        session.flush()
+
+        logger.info("QNR ingest complete: %d written contributions.", len(rows))
+        return len(rows)
+
     def process_and_classify_contributions(self, session: Session, meeting_id: Optional[int] = None):
         """Combines text cleaning, metadata extraction, and row classification 
 
@@ -630,11 +768,142 @@ class SeneddPipeline:
             logger.info("Meeting %s fully committed to operational dimensions.", meeting_id)
         return success
 
+    # Artifact types we re-check for after a transcript lands, mapped to the
+    # portal's transcript-type filter and the ingest method that consumes them.
+    _WATCHED_ARTIFACTS = {
+        "votes": "Votes",
+        "qnr": "QNR",
+    }
+
+    def register_artifact_watches(self, session: Session, meeting_id: int, meeting_date: datetime):
+        """Open pending Votes/QNR watches for a freshly-ingested transcript meeting.
+
+        Idempotent on (meeting_id, artifact_type). Skips meetings already older
+        than the watch window (e.g. historical backfill) — those artifacts, if
+        they exist, are already published and not subject to late attachment.
+        """
+        deadline = meeting_date + timedelta(days=settings.artifact_watch_days)
+        if deadline < datetime.utcnow():
+            return
+        rows = [
+            {"meeting_id": meeting_id, "artifact_type": at, "status": "pending", "deadline": deadline}
+            for at in self._WATCHED_ARTIFACTS
+        ]
+        session.execute(
+            insert(ArtifactWatch).values(rows)
+            .on_conflict_do_nothing(index_elements=["meeting_id", "artifact_type"])
+        )
+
+    def run_artifact_watch_sweep(self, data_dir: Optional[Path] = None, keep_xml: bool = False) -> int:
+        """Re-check the portal for any pending Votes/QNR and attach those now available.
+
+        The portal's default (unfiltered) listing covers the recent meetings —
+        comfortably wider than the watch window — so it is fetched once and each
+        artifact type is matched by ``meeting_id``. (Date-parameterised URLs
+        return a linkless page, so per-meeting queries are not viable.) For each
+        pending watch: expire it silently once past its deadline; otherwise, if
+        the download is now present, ingest it idempotently and mark the watch
+        done. Returns the number of artifacts ingested this sweep.
+        """
+        data_dir = data_dir or Path("data")
+        data_dir.mkdir(exist_ok=True)
+
+        with self.SessionLocal() as session:
+            pending = (
+                session.query(
+                    ArtifactWatch.id, ArtifactWatch.meeting_id,
+                    ArtifactWatch.artifact_type, ArtifactWatch.deadline,
+                )
+                .filter(ArtifactWatch.status == "pending")
+                .all()
+            )
+
+        if not pending:
+            logger.info("Artifact watch sweep: no pending watches.")
+            return 0
+
+        logger.info("Artifact watch sweep: %d pending watch(es) to re-check.", len(pending))
+        fetcher = DataFetcher()
+        now = datetime.utcnow()
+        ingested = 0
+
+        # One portal fetch; build a {meeting_id(str) -> Meeting} map per artifact.
+        try:
+            html = fetcher.get_html_page()
+        except Exception as e:
+            logger.warning("Artifact watch sweep aborted — portal fetch failed: %s", e)
+            return 0
+        available: dict = {}
+        for artifact_type, transcript_type in self._WATCHED_ARTIFACTS.items():
+            available[artifact_type] = {
+                str(m.meeting_id): m
+                for m in fetcher.parse_meetings_from_html(html, transcript_type=transcript_type)
+            }
+
+        for watch_id, meeting_id, artifact_type, deadline in pending:
+            if now > deadline:
+                logger.info(
+                    "Watch %s (%s for meeting %s) past deadline; expiring.",
+                    watch_id, artifact_type, meeting_id,
+                )
+                self._update_watch(watch_id, status="expired", checked_at=now)
+                continue
+
+            transcript_type = self._WATCHED_ARTIFACTS[artifact_type]
+            match = available.get(artifact_type, {}).get(str(meeting_id))
+            if match is None:
+                logger.debug("%s not yet available for meeting %s.", transcript_type, meeting_id)
+                self._update_watch(watch_id, checked_at=now, bump_attempt=True)
+                continue
+
+            xml_path = fetcher.download_file(match, data_dir, transcript_type=transcript_type)
+            if not xml_path or not xml_path.exists():
+                self._update_watch(watch_id, checked_at=now, bump_attempt=True)
+                continue
+
+            try:
+                with self.SessionLocal() as session:
+                    with session.begin():
+                        if artifact_type == "votes":
+                            self.ingest_votes(session, xml_path)
+                        else:
+                            self.ingest_qnr(session, xml_path)
+                self._update_watch(watch_id, status="done", checked_at=now)
+                ingested += 1
+                logger.info("Attached %s for meeting %s.", artifact_type, meeting_id)
+            except Exception as e:
+                logger.exception("Failed to ingest %s for meeting %s: %s", artifact_type, meeting_id, e)
+                self._update_watch(watch_id, checked_at=now, bump_attempt=True)
+            finally:
+                if not keep_xml and xml_path and xml_path.exists():
+                    fetcher.cleanup_file(xml_path)
+
+        logger.info("Artifact watch sweep complete: %d artifact(s) attached.", ingested)
+        return ingested
+
+    def _update_watch(self, watch_id: int, status: Optional[str] = None,
+                      checked_at: Optional[datetime] = None, bump_attempt: bool = False):
+        """Apply a small status/bookkeeping update to a single watch row."""
+        values: dict = {}
+        if status is not None:
+            values["status"] = status
+        if checked_at is not None:
+            values["last_checked"] = checked_at
+        if bump_attempt:
+            values["attempts"] = ArtifactWatch.attempts + 1
+        if not values:
+            return
+        with self.SessionLocal() as session:
+            with session.begin():
+                session.query(ArtifactWatch).filter(ArtifactWatch.id == watch_id).update(
+                    values, synchronize_session=False
+                )
+
     def run_incremental(
-        self, 
-        data_dir: Optional[Path] = None, 
-        keep_xml: bool = False, 
-        last_sync_date: Optional[datetime] = None, 
+        self,
+        data_dir: Optional[Path] = None,
+        keep_xml: bool = False,
+        last_sync_date: Optional[datetime] = None,
         transcript_type: Literal["BilingualTranscript", "WelshTranscript", "EnglishTranscript", "Votes", "QNR"] = "BilingualTranscript"
     ):
         """
@@ -656,23 +925,32 @@ class SeneddPipeline:
         # Detect new meetings
         new_meetings = fetcher.check_for_updates(last_sync_date, transcript_type)
         if not new_meetings:
-            logger.info("No incremental updates found on remote Senedd feeds. Hibernating.")
-            return
-        
-        logger.info("Discovered %d new plenary session transcripts requiring transformation processing.", len(new_meetings))
-        
-        # Dispatch to the worker method
+            logger.info("No new transcripts on remote Senedd feeds.")
+        else:
+            logger.info("Discovered %d new plenary session transcripts requiring transformation processing.", len(new_meetings))
+
+        # Dispatch to the worker method, registering a Votes/QNR watch per success.
         files_processed = 0
         for meeting in new_meetings:
             if self.process_single_meeting(meeting, data_dir, keep_xml):
                 files_processed += 1
-                
+                with self.SessionLocal() as session:
+                    with session.begin():
+                        self.register_artifact_watches(
+                            session, int(meeting.meeting_id), meeting.meeting_date
+                        )
+
         # Record checkpoint
         if files_processed > 0:
             with self.SessionLocal() as session:
                 with session.begin():
                     self.record_sync_checkpoint(session, files_processed, status="success")
-        
+
+        # Always sweep for late-publishing Votes/QNR — they attach to meetings
+        # processed on earlier runs, not just this one, so this must run even when
+        # no new transcripts were found.
+        self.run_artifact_watch_sweep(data_dir, keep_xml)
+
         logger.info("Incremental synchronization job execution finalized. Total synchronized sets: %d", files_processed)
 
     def run_for_meetings(
