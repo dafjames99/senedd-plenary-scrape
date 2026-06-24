@@ -34,11 +34,8 @@ def run_embedding_sweep(
         
         batch_count = 0
         while True:
-            # 1. Check current capacity context
-            with embed_pipeline.SessionLocal() as session:
-                unembedded_remaining = embed_pipeline.get_unembedded_speeches(session, limit=1)
-                
-            if not unembedded_remaining:
+            # 1. Check current capacity context across all sources (speech/written/vote)
+            if not embed_pipeline.has_unembedded():
                 logger.info("No unembedded records remaining. Vector sweep target complete.")
                 break
             batch_count += 1

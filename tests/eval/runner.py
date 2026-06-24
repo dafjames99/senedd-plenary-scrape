@@ -43,6 +43,9 @@ def _retrieve(
         top_k=depth,
         min_similarity=0.0,
         speaker_filter=case.speaker,
+        # The labelled cases are all spoken speeches; pin the source so the
+        # baseline measures speech retrieval in isolation (no cross-source drift).
+        source="spoken",
         provider_string=provider,
         model_string=model,
     )

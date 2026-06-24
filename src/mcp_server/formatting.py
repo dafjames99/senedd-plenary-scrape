@@ -48,6 +48,9 @@ def search_hit(result: SearchResult) -> dict:
     with the ``speech_id`` for the complete text before quoting at length.
     """
     return {
+        "source_type": result.source_type,
+        "source_id": result.source_id,
+        # speech_id retained for spoken speeches (None for written/vote sources)
         "speech_id": result.speech_id,
         "speaker_name": result.speaker_name,
         "meeting_date": result.meeting_date.isoformat() if result.meeting_date else None,
