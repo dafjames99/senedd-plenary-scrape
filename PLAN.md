@@ -147,19 +147,29 @@ without migrations. Both come first.
 
 ---
 
-## Phase 4 — Vote/QNR embedding + tools + query-strategy hardening
+## Phase 4 — Vote/QNR embedding + tools + query-strategy hardening  *(in progress — `phase-4-embed-tools`)*
 
-- [ ] **Embedding (moved from Phase 3):** generalise the embedding pipeline to embed
-      `written_contributions` (`source_type='written'`) and `vote_name_english`
-      (`source_type='vote'`); make `semantic_search` span those sources (resolving each
-      source's citation metadata) behind a `source` filter (spoken | written | vote).
-      Re-run the eval harness afterwards to confirm no speech regression.
-- [ ] **Purge-procedure cascade mitigation:** the generic `source_id` carries no FK, so add
-      explicit non-speech embedding cleanup on reprocess to `purge_*` (needed once non-speech
-      vectors exist).
-- [ ] Tools: `get_vote`, `find_votes`, `get_member_voting_record`, `get_votes_for_speech`
-      (rhetoric↔vote bridge via `contribution_id`); `get_written_answers`.
-- [ ] Prompts: `stance-vs-vote`, `issue-briefing`, `compare-speakers`.
+- [x] **Embedding (moved from Phase 3):** embedding pipeline generalised to a polymorphic
+      source registry — embeds `written_contributions` (`source_type='written'`) and
+      `vote_name_english` (`source_type='vote'`) alongside speeches; the sweep (`main.py`)
+      now drains all sources via `has_unembedded()`. Vote names skip the 10-word gate and
+      carry no speaker prefix. (Local gemma DB: 4772 speech + 5 vote + 4 written vectors.)
+- [x] **Source-aware search:** `semantic_search(source=spoken|written|vote)` runs one ranking
+      CTE per source (best chunk per item), resolves each source's own citation metadata, and
+      re-ranks globally by cosine distance. The speech path is byte-identical to the
+      speech-only release; eval re-run = **MRR 0.903, unchanged**. `SearchResult` gained
+      `source_type`/`source_id`/`full_text` (speech_id/speech_text retained for speeches). A
+      speaker filter excludes votes (no speaker). CLI + eval runner + MCP `search_hit` updated.
+- [x] **Purge-procedure cascade mitigation:** `purge_downstream_tables` now reaps orphaned
+      vote/written vectors explicitly (`NOT EXISTS` against `votes`/`written_contributions`) —
+      the generic `source_id` has no FK cascade, so speeches' truncate can't reach them.
+- [x] Tools: `senedd_get_vote`, `senedd_find_votes`, `senedd_get_member_voting_record`,
+      `senedd_get_votes_for_speech` (rhetoric↔vote bridge via shared meeting+agenda_item);
+      `senedd_get_written_answers` (Q&A pairs by `pair_id`). 13 tools total. Resources
+      (`data-dictionary`, `corpus-stats`) + instructions updated to surface votes/QNR.
+      Note: enum columns persist by *name*, so raw SQL returns `FOR`/`QUESTION` — added
+      `_vote_result`/`_qa_role` to map back to friendly values.
+- [x] Prompts: `senedd_stance_vs_vote`, `senedd_issue_briefing`, `senedd_compare_speakers`.
 - [ ] Iterate the search strategy against the eval harness.
 - [ ] **Only if eval shows recall gaps:** add server-side multi-query fusion (RRF) or HyDE
       (note: a hypothetical *document* should use doc-side framing, not the `query_prefix`).
