@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # transcript we re-check the portal for these artifacts until this many days
     # past the meeting, then give up silently.
     artifact_watch_days: int = Field(default=14, alias="ARTIFACT_WATCH_DAYS")
+
+    # Content-addressed embedding cache (src/embeddings/cache.py). Reuses a vector
+    # whenever the exact embedded string + model has been seen before — saving
+    # recompute on backfill re-runs and chunking/filter experiments. A dev aid;
+    # disable in prod (no re-runs there) to skip the write path and table growth.
+    embed_cache_enabled: bool = Field(default=True, alias="EMBED_CACHE_ENABLED")
     # secret_key: str = Field(default="your_secret_key_here", alias="SECRET_KEY") #UNUSED
 
     # --- Runtime Flags & Controls ---

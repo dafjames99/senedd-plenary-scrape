@@ -271,6 +271,40 @@ class SpeechEmbedding(Base):
     )
 
 
+class EmbeddingCache(Base):
+    """Content-addressed cache of embedding vectors.
+
+    Keyed on a SHA-256 of the *exact* string sent to the provider (doc_prefix +
+    speaker prefix + chunk) plus ``model_name``, so a vector is reused only when
+    it would be byte-identical. Deliberately carries NO foreign key to
+    ``speeches``: it is content-addressed and must survive the delete-and-rebuild
+    of speeches on re-ingest, letting a backfill re-run (or a chunking/filter
+    experiment that later reverts) reuse every vector instead of recomputing it.
+
+    ``embed_config_version`` is provenance only — for bulk eviction and
+    debugging. Correctness rides entirely on the hash: any change to the embedded
+    string already changes the hash, so a stale config can never produce a false
+    hit. Wiped via the ``purge_embedding_cache`` procedure; expected near-empty in
+    production (no backfill re-runs, no experiments), where it can be evicted by
+    age if it bloats.
+    """
+    __tablename__ = "embedding_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    text_hash = Column(String(64), nullable=False)  # sha256 hex of the embedded string
+    model_name = Column(String(100), nullable=False)
+    embedding_vector = Column(Vector, nullable=False)
+    embed_config_version = Column(String(50), nullable=True)
+    char_len = Column(Integer, nullable=True)
+    hit_count = Column(Integer, nullable=False, server_default="0")
+    created_at = Column(DateTime, default=datetime.now)
+    last_used_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint("text_hash", "model_name", name="uq_embedding_cache_hash_model"),
+    )
+
+
 class VoteResultEnum(enum.Enum):
     """Per-member outcome on a recorded vote.
 

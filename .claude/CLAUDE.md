@@ -48,6 +48,7 @@ Copy `.env` and set:
 | `HF_TOKEN` | — | HuggingFace token for gated models |
 | `OPENAI_API_KEY` | — | Required if using `openai` provider |
 | `EMBED_BATCH_SIZE` | `250` | Speeches per embedding batch |
+| `EMBED_CACHE_ENABLED` | `true` | Content-addressed embedding cache (dev aid; disable in prod) |
 | `LOG_LEVEL` | `INFO` | |
 
 ## Architecture
@@ -78,6 +79,10 @@ Pluggable via `PROVIDER_REGISTER` in `src/embeddings/providers.py`. Each provide
 
 Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m`, `openai/text-embedding-3-small`.
 
+### Embedding cache
+
+`src/embeddings/cache.py` is a content-addressed cache (`embedding_cache` table) keyed on `sha256(formatted_chunk)` + `model_name`, where `formatted_chunk` is the exact string sent to the provider (`doc_prefix + speaker_prefix + chunk`). The pipeline embeds only cache misses and writes computed vectors back in the same transaction. It has **no FK to `speeches`**, so it survives the delete-and-rebuild of speeches on re-ingest — a backfill re-run (or a reverted chunking experiment) reuses every vector instead of recomputing it. `embed_config_version` is provenance only; correctness rides on the hash. A dev aid (disable via `EMBED_CACHE_ENABLED=false` in prod); wipe with `CALL purge_embedding_cache(...)`.
+
 ### Incremental sync
 
 `DataFetcher` (`src/db/fetcher.py`) scrapes `https://record.senedd.wales/XMLExport`, parses meeting rows filtered by transcript type (default `BilingualTranscript`), and downloads XML for meetings newer than the last `SyncCheckpoint`. The backfill script (`scripts/backfill.py`) walks a date range day-by-day (with rate limiting) and can cache discovered meetings to CSV as a resumability checkpoint.
@@ -88,4 +93,4 @@ Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m
 
 ### SQL procedures
 
-Stored in `src/db/procedures/` and registered at schema creation time. `001_purge_downstream.sql` is called by `reprocess` mode to safely truncate downstream tables before rebuilding.
+Stored in `src/db/procedures/` and registered at schema creation time. `001_purge_downstream.sql` is called by `reprocess` mode to safely truncate downstream tables before rebuilding. `003_purge_embedding_cache.sql` wipes the embedding cache, with optional `model_name` / `version` / `older_than` filters (NULL = all).
