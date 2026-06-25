@@ -170,9 +170,15 @@ without migrations. Both come first.
       Note: enum columns persist by *name*, so raw SQL returns `FOR`/`QUESTION` — added
       `_vote_result`/`_qa_role` to map back to friendly values.
 - [x] Prompts: `senedd_stance_vs_vote`, `senedd_issue_briefing`, `senedd_compare_speakers`.
-- [ ] Iterate the search strategy against the eval harness.
-- [ ] **Only if eval shows recall gaps:** add server-side multi-query fusion (RRF) or HyDE
-      (note: a hypothetical *document* should use doc-side framing, not the `query_prefix`).
+- [x] Iterate the search strategy against the eval harness. *(2026-06-25 re-run on the
+      source-aware stack: **MRR 0.903, hit@3 1.00, recall@5 1.00 — identical to the
+      2026-06-17 baseline.** Source-aware multi-source re-ranking did not regress the
+      speech path.)*
+- [x] **Only if eval shows recall gaps:** add server-side multi-query fusion (RRF) or HyDE.
+      *(No gap — every target inside depth 20, recall@5 = 1.00 — so not warranted. Skipped.)*
+- Caveat: the 12 eval cases are **speech-only**; vote/QNR retrieval is untested (local DB
+  has only 5 vote + 4 written vectors). Revisit the eval set once a backfill thickens
+  those sources — tracked alongside the historic-backfill / prod planning.
 
 ---
 

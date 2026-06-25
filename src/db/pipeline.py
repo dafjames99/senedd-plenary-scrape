@@ -410,7 +410,19 @@ class SeneddPipeline:
         if not meeting:
             logger.warning("Aborting speech reconstruction: meeting_id=%s does not exist in schema references.", meeting_id)
             return 0
-            
+
+        # Idempotent rebuild: speeches carry an autoincrement PK with no natural
+        # key, so re-running would otherwise duplicate them. Purge this meeting's
+        # existing speeches first; the FK cascade clears their speech_parts and
+        # (now-stale) speech_embeddings, which the embed sweep regenerates.
+        deleted = (
+            session.query(Speech)
+            .filter(Speech.meeting_id == meeting_id)
+            .delete(synchronize_session=False)
+        )
+        if deleted:
+            logger.debug("Meeting %s: cleared %d existing speeches before rebuild.", meeting_id, deleted)
+
         # Get all speech-classified rows, ordered by contribution_order_id
         speech_rows = session.query(
             RawContribution, CleanContribution
@@ -579,7 +591,13 @@ class SeneddPipeline:
         meeting = session.query(Meeting).filter_by(meeting_id=meeting_id).first()
         if not meeting:
             return 0
-            
+
+        # Idempotent rebuild: procedural_events has an autoincrement PK and no
+        # conflict guard, so purge this meeting's rows before re-inserting.
+        session.query(ProceduralEvent).filter(
+            ProceduralEvent.meeting_id == meeting_id
+        ).delete(synchronize_session=False)
+
         procedural_rows = (
             session.query(RawContribution)
             .filter(RawContribution.meeting_id == meeting_id)
@@ -767,6 +785,58 @@ class SeneddPipeline:
         if success:
             logger.info("Meeting %s fully committed to operational dimensions.", meeting_id)
         return success
+
+    def process_meeting_all_artifacts(self, meeting: Meeting, data_dir: Path, keep_xml: bool) -> bool:
+        """Process a meeting's transcript plus any Votes/QNR artifacts in one pass.
+
+        Used by the backfill path, where Votes/QNR are typically already published
+        so there is no need to defer them to the artifact-watch sweep. Ordering is
+        deliberate: the transcript is ingested first (committed in its own
+        transaction by ``process_single_meeting``) so the vote motion's
+        contribution row and members exist before ``ingest_votes`` runs; QNR is
+        independent of the transcript. Artifact failures are logged but
+        non-fatal — a missing Votes export must not lose the transcript.
+
+        Returns True if the transcript was processed.
+        """
+        if not self.process_single_meeting(meeting, data_dir, keep_xml):
+            return False
+
+        artifacts = meeting.artifacts or {}
+        for artifact_type, ingest_fn in (
+            ("Votes", self.ingest_votes),
+            ("QNR", self.ingest_qnr),
+        ):
+            if artifact_type in artifacts:
+                self._ingest_meeting_artifact(
+                    meeting, artifact_type, ingest_fn, data_dir, keep_xml
+                )
+        return True
+
+    def _ingest_meeting_artifact(self, meeting, artifact_type, ingest_fn, data_dir, keep_xml) -> bool:
+        """Download and ingest a single non-transcript artifact (Votes/QNR)."""
+        fetcher = DataFetcher()
+        xml_path = fetcher.download_file(meeting, data_dir, transcript_type=artifact_type)
+        if not xml_path or not xml_path.exists():
+            logger.warning(
+                "Could not download %s for meeting %s; skipping artifact.",
+                artifact_type, meeting.meeting_id,
+            )
+            return False
+        try:
+            with self.SessionLocal() as session:
+                with session.begin():
+                    ingest_fn(session, xml_path)
+            return True
+        except Exception as e:
+            logger.exception(
+                "Failed ingesting %s for meeting %s: %s",
+                artifact_type, meeting.meeting_id, e,
+            )
+            return False
+        finally:
+            if not keep_xml and xml_path and xml_path.exists():
+                fetcher.cleanup_file(xml_path)
 
     # Artifact types we re-check for after a transcript lands, mapped to the
     # portal's transcript-type filter and the ingest method that consumes them.
@@ -971,9 +1041,18 @@ class SeneddPipeline:
         
         files_processed = 0
         for meeting in meetings:
-            if self.process_single_meeting(meeting, data_dir, keep_xml):
+            if self.process_meeting_all_artifacts(meeting, data_dir, keep_xml):
                 files_processed += 1
-                
+                # Open watches for any artifact not yet published. This self-skips
+                # historic meetings (deadline already past), so it is a no-op for a
+                # back-dated backfill but keeps a recent-window backfill correct —
+                # late Votes/QNR get attached by the next incremental sweep.
+                with self.SessionLocal() as session:
+                    with session.begin():
+                        self.register_artifact_watches(
+                            session, int(meeting.meeting_id), meeting.meeting_date
+                        )
+
         logger.info("Targeted manual execution processing complete. Ingested profiles: %d", files_processed)
         return files_processed
     
