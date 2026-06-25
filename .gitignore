@@ -17,6 +17,9 @@ senedd_records.db
 # Eval harness output (regenerable)
 eval_*.json
 
+# Analysis artifacts (regenerable charts/CSVs)
+analysis/output/
+
 # Raw data files
 data/
 data/*.xml
