@@ -30,8 +30,9 @@ def display_results(query_text: str, results: List[SearchResult]) -> None:
 
     for i, r in enumerate(results, 1):
         date_str = r.meeting_date.strftime("%d %b %Y") if r.meeting_date else "unknown date"
-        print(f"\n[{i}] {r.speaker_name}  |  {date_str}  |  Agenda: {r.agenda_item_id}")
-        print(f"    Confidence: {r.similarity_score:.1f}%  |  Speech ID: {r.speech_id}")
+        speaker = r.speaker_name or "—"
+        print(f"\n[{i}] {speaker}  |  {date_str}  |  Agenda: {r.agenda_item_id}")
+        print(f"    Confidence: {r.similarity_score:.1f}%  |  {r.source_type} #{r.source_id}")
         print(f"    Excerpt:    {r.chunk_text[:220].strip()}")
         if r.senedd_tv_url:
             print(f"    SeneddTV:   {r.senedd_tv_url}")
@@ -54,6 +55,9 @@ if __name__ == "__main__":
                         help="Inclusive upper bound on meeting date (YYYY-MM-DD)")
     parser.add_argument("--agenda-item", type=str, default=None,
                         help="Restrict to an exact agenda_item_id")
+    parser.add_argument("--source", type=str, default=None,
+                        choices=["spoken", "written", "vote"],
+                        help="Restrict to one source (default: all)")
     args = parser.parse_args()
 
     results = semantic_search(
@@ -64,5 +68,6 @@ if __name__ == "__main__":
         date_from=args.date_from,
         date_to=args.date_to,
         agenda_item=args.agenda_item,
+        source=args.source,
     )
     display_results(args.query, results)

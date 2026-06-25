@@ -15,6 +15,7 @@ from typing import List, Optional
 
 from sqlalchemy import text
 
+from src.db.db_schema import QaRoleEnum, VoteResultEnum
 from src.db.pipeline import SeneddPipeline
 from src.db.settings import settings
 from src.search._dates import DateLike, coerce_datetime
@@ -113,6 +114,86 @@ class MeetingInfo:
     assembly: Optional[int]
     speech_count: int
     agenda_items: List[AgendaItem] = field(default_factory=list)
+
+
+@dataclass
+class VoteRecordItem:
+    """How one member voted on one motion."""
+
+    member_id: int
+    member_name: Optional[str]
+    result: str  # For | Against | Abstain | DidNotVote
+
+
+@dataclass
+class VoteSummary:
+    """A motion-level vote without the per-member breakdown (for listings)."""
+
+    vote_id: int
+    contribution_id: int
+    meeting_id: int
+    meeting_date: Optional[datetime]
+    agenda_item_id: Optional[str]
+    vote_name_english: Optional[str]
+    result_english: Optional[str]
+    total_for: Optional[int]
+    total_against: Optional[int]
+    total_abstain: Optional[int]
+
+
+@dataclass
+class VoteDetail:
+    """A motion-level vote with tallies and the full per-member record."""
+
+    vote_id: int
+    contribution_id: int
+    meeting_id: int
+    meeting_date: Optional[datetime]
+    agenda_item_id: Optional[str]
+    agenda_item_english: Optional[str]
+    vote_name_english: Optional[str]
+    vote_name_welsh: Optional[str]
+    total_for: Optional[int]
+    total_against: Optional[int]
+    total_abstain: Optional[int]
+    result_english: Optional[str]
+    result_welsh: Optional[str]
+    records: List[VoteRecordItem] = field(default_factory=list)
+
+
+@dataclass
+class MemberVoteItem:
+    """One member's outcome on a single vote, for their voting record."""
+
+    vote_id: int
+    meeting_id: int
+    meeting_date: Optional[datetime]
+    agenda_item_id: Optional[str]
+    vote_name_english: Optional[str]
+    result: str
+
+
+@dataclass
+class WrittenContributionItem:
+    """One side (question or answer) of a written QNR contribution."""
+
+    id: int
+    qa_role: str  # question | answer
+    speaker_name: Optional[str]
+    speaker_job_title: Optional[str]
+    text_english: Optional[str]
+
+
+@dataclass
+class WrittenPair:
+    """A positionally-paired written question and its answer (either may be absent)."""
+
+    pair_id: Optional[str]
+    meeting_id: int
+    meeting_date: Optional[datetime]
+    agenda_item_id: Optional[str]
+    question: Optional[WrittenContributionItem]
+    answer: Optional[WrittenContributionItem]
 
 
 # ---------------------------------------------------------------------------
@@ -482,3 +563,304 @@ def get_agenda_thread(
         )
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Votes
+# ---------------------------------------------------------------------------
+
+def get_vote(vote_id: int) -> Optional[VoteDetail]:
+    """Fetch one motion-level vote with tallies and the full per-member record."""
+    vote_sql = text("""
+        SELECT v.vote_id, v.contribution_id, v.meeting_id, m.meeting_date,
+               v.agenda_item_id, v.agenda_item_english,
+               v.vote_name_english, v.vote_name_welsh,
+               v.total_for, v.total_against, v.total_abstain,
+               v.result_english, v.result_welsh
+        FROM votes v
+        JOIN meetings m ON v.meeting_id = m.meeting_id
+        WHERE v.vote_id = :vote_id
+    """)
+    records_sql = text("""
+        SELECT vr.member_id, mb.name_english AS member_name, vr.result
+        FROM vote_records vr
+        LEFT JOIN members mb ON vr.member_id = mb.member_id
+        WHERE vr.vote_id = :vote_id
+        ORDER BY vr.result, mb.name_english
+    """)
+    with _session() as session:
+        row = session.execute(vote_sql, {"vote_id": vote_id}).first()
+        if row is None:
+            return None
+        record_rows = session.execute(records_sql, {"vote_id": vote_id}).fetchall()
+    return VoteDetail(
+        vote_id=row.vote_id,
+        contribution_id=row.contribution_id,
+        meeting_id=row.meeting_id,
+        meeting_date=row.meeting_date,
+        agenda_item_id=row.agenda_item_id,
+        agenda_item_english=row.agenda_item_english,
+        vote_name_english=row.vote_name_english,
+        vote_name_welsh=row.vote_name_welsh,
+        total_for=row.total_for,
+        total_against=row.total_against,
+        total_abstain=row.total_abstain,
+        result_english=row.result_english,
+        result_welsh=row.result_welsh,
+        records=[
+            VoteRecordItem(
+                member_id=rec.member_id,
+                member_name=rec.member_name,
+                result=_vote_result(rec.result),
+            )
+            for rec in record_rows
+        ],
+    )
+
+
+def find_votes(
+    motion_contains: Optional[str] = None,
+    agenda_item: Optional[str] = None,
+    date_from: Optional[DateLike] = None,
+    date_to: Optional[DateLike] = None,
+    limit: int = 50,
+) -> List[VoteSummary]:
+    """List motion-level votes by structured filters, newest first.
+
+    For meaning-based discovery of a vote use ``semantic_search(source='vote')``;
+    this is the structured counterpart (exact agenda item, date window, or a
+    substring of the motion name).
+    """
+    conditions = ["TRUE"]
+    params: dict = {"limit": limit}
+    if motion_contains:
+        conditions.append("v.vote_name_english ILIKE :motion")
+        params["motion"] = f"%{motion_contains}%"
+    if agenda_item:
+        conditions.append("v.agenda_item_id = :agenda_item")
+        params["agenda_item"] = agenda_item
+    if date_from:
+        conditions.append("m.meeting_date >= :date_from")
+        params["date_from"] = coerce_datetime(date_from)
+    if date_to:
+        conditions.append("m.meeting_date <= :date_to")
+        params["date_to"] = coerce_datetime(date_to, end_of_day=True)
+    where_clause = " AND ".join(conditions)
+
+    sql = text(f"""
+        SELECT v.vote_id, v.contribution_id, v.meeting_id, m.meeting_date,
+               v.agenda_item_id, v.vote_name_english, v.result_english,
+               v.total_for, v.total_against, v.total_abstain
+        FROM votes v
+        JOIN meetings m ON v.meeting_id = m.meeting_id
+        WHERE {where_clause}
+        ORDER BY m.meeting_date DESC, v.vote_id DESC
+        LIMIT :limit
+    """)
+    with _session() as session:
+        rows = session.execute(sql, params).fetchall()
+    return [_vote_summary(r) for r in rows]
+
+
+def get_votes_for_speech(speech_id: int) -> List[VoteSummary]:
+    """Return votes taken on the same meeting + agenda item as a speech.
+
+    The rhetoric↔vote bridge: a speech's agenda item is resolved, then every vote
+    recorded under that agenda item in that meeting is returned, so a member's
+    argument can be set beside how the chamber then divided.
+    """
+    anchor_sql = text(
+        "SELECT meeting_id, agenda_item_id FROM speeches WHERE speech_id = :sid"
+    )
+    votes_sql = text("""
+        SELECT v.vote_id, v.contribution_id, v.meeting_id, m.meeting_date,
+               v.agenda_item_id, v.vote_name_english, v.result_english,
+               v.total_for, v.total_against, v.total_abstain
+        FROM votes v
+        JOIN meetings m ON v.meeting_id = m.meeting_id
+        WHERE v.meeting_id = :meeting_id AND v.agenda_item_id = :agenda_item_id
+        ORDER BY v.vote_id ASC
+    """)
+    with _session() as session:
+        anchor = session.execute(anchor_sql, {"sid": speech_id}).first()
+        if anchor is None:
+            return []
+        rows = session.execute(votes_sql, {
+            "meeting_id": anchor.meeting_id,
+            "agenda_item_id": anchor.agenda_item_id,
+        }).fetchall()
+    return [_vote_summary(r) for r in rows]
+
+
+def get_member_voting_record(
+    member_id: int,
+    date_from: Optional[DateLike] = None,
+    date_to: Optional[DateLike] = None,
+    limit: int = 100,
+) -> List[MemberVoteItem]:
+    """Return how a member voted across recorded votes, newest first."""
+    conditions = ["vr.member_id = :member_id"]
+    params: dict = {"member_id": member_id, "limit": limit}
+    if date_from:
+        conditions.append("m.meeting_date >= :date_from")
+        params["date_from"] = coerce_datetime(date_from)
+    if date_to:
+        conditions.append("m.meeting_date <= :date_to")
+        params["date_to"] = coerce_datetime(date_to, end_of_day=True)
+    where_clause = " AND ".join(conditions)
+
+    sql = text(f"""
+        SELECT v.vote_id, v.meeting_id, m.meeting_date, v.agenda_item_id,
+               v.vote_name_english, vr.result
+        FROM vote_records vr
+        JOIN votes v ON vr.vote_id = v.vote_id
+        JOIN meetings m ON v.meeting_id = m.meeting_id
+        WHERE {where_clause}
+        ORDER BY m.meeting_date DESC, v.vote_id DESC
+        LIMIT :limit
+    """)
+    with _session() as session:
+        rows = session.execute(sql, params).fetchall()
+    return [
+        MemberVoteItem(
+            vote_id=r.vote_id,
+            meeting_id=r.meeting_id,
+            meeting_date=r.meeting_date,
+            agenda_item_id=r.agenda_item_id,
+            vote_name_english=r.vote_name_english,
+            result=_vote_result(r.result),
+        )
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Written QNR (questions/answers not reached)
+# ---------------------------------------------------------------------------
+
+def get_written_answers(
+    meeting_id: Optional[int] = None,
+    agenda_item: Optional[str] = None,
+    speaker: Optional[str] = None,
+    date_from: Optional[DateLike] = None,
+    date_to: Optional[DateLike] = None,
+    limit: int = 50,
+) -> List[WrittenPair]:
+    """Return written QNR Q&A pairs (question + positionally-paired answer).
+
+    Rows are grouped by their deterministic ``pair_id`` so each result is a
+    question with its answer (either side may be missing if the feed omitted it).
+    ``speaker`` matches either the questioner's name or the answering office's
+    job title (answers carry no member id).
+    """
+    conditions = ["TRUE"]
+    params: dict = {"limit": limit}
+    if meeting_id is not None:
+        conditions.append("w.meeting_id = :meeting_id")
+        params["meeting_id"] = meeting_id
+    if agenda_item:
+        conditions.append("w.agenda_item_id = :agenda_item")
+        params["agenda_item"] = agenda_item
+    if speaker:
+        conditions.append(
+            "(w.speaker_name_english ILIKE :speaker "
+            "OR w.speaker_job_title_english ILIKE :speaker)"
+        )
+        params["speaker"] = f"%{speaker}%"
+    if date_from:
+        conditions.append("m.meeting_date >= :date_from")
+        params["date_from"] = coerce_datetime(date_from)
+    if date_to:
+        conditions.append("m.meeting_date <= :date_to")
+        params["date_to"] = coerce_datetime(date_to, end_of_day=True)
+    where_clause = " AND ".join(conditions)
+
+    # Pull all matching contributions; group into pairs in Python (a pair is at
+    # most one question + one answer, ordered by document position).
+    sql = text(f"""
+        SELECT w.id, w.meeting_id, m.meeting_date, w.agenda_item_id,
+               w.qa_role, w.pair_id, w.order_index,
+               w.speaker_name_english, w.speaker_job_title_english, w.text_english
+        FROM written_contributions w
+        JOIN meetings m ON w.meeting_id = m.meeting_id
+        WHERE {where_clause}
+        ORDER BY w.meeting_id ASC, w.order_index ASC
+    """)
+    with _session() as session:
+        rows = session.execute(sql, params).fetchall()
+
+    pairs: List[WrittenPair] = []
+    index: dict = {}
+    for r in rows:
+        item = WrittenContributionItem(
+            id=r.id,
+            qa_role=_qa_role(r.qa_role),
+            speaker_name=r.speaker_name_english,
+            speaker_job_title=r.speaker_job_title_english,
+            text_english=r.text_english,
+        )
+        # Group on (meeting_id, pair_id); fall back to a per-row key when pair_id
+        # is absent so an unpaired contribution still surfaces.
+        key = (r.meeting_id, r.pair_id) if r.pair_id else (r.meeting_id, f"_solo_{r.id}")
+        pair = index.get(key)
+        if pair is None:
+            if len(pairs) >= limit:
+                continue
+            pair = WrittenPair(
+                pair_id=r.pair_id,
+                meeting_id=r.meeting_id,
+                meeting_date=r.meeting_date,
+                agenda_item_id=r.agenda_item_id,
+                question=None,
+                answer=None,
+            )
+            index[key] = pair
+            pairs.append(pair)
+        if item.qa_role == "answer":
+            pair.answer = item
+        else:
+            pair.question = item
+    return pairs
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _vote_result(value) -> str:
+    """Normalise a stored vote result to its friendly value (e.g. ``DidNotVote``).
+
+    Raw SQL returns the enum *name* (``FOR``, ``DID_NOT_VOTE``) since SQLAlchemy
+    persists ``Enum`` by name; map it back to the human value.
+    """
+    if hasattr(value, "value"):
+        return value.value
+    try:
+        return VoteResultEnum[value].value
+    except (KeyError, TypeError):
+        return value
+
+
+def _qa_role(value) -> str:
+    """Normalise a stored QA role (``QUESTION``/``ANSWER`` name) to its value."""
+    if hasattr(value, "value"):
+        return value.value
+    try:
+        return QaRoleEnum[value].value
+    except (KeyError, TypeError):
+        return value
+
+
+def _vote_summary(r) -> VoteSummary:
+    return VoteSummary(
+        vote_id=r.vote_id,
+        contribution_id=r.contribution_id,
+        meeting_id=r.meeting_id,
+        meeting_date=r.meeting_date,
+        agenda_item_id=r.agenda_item_id,
+        vote_name_english=r.vote_name_english,
+        result_english=r.result_english,
+        total_for=r.total_for,
+        total_against=r.total_against,
+        total_abstain=r.total_abstain,
+    )
