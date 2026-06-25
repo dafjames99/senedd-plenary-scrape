@@ -12,6 +12,7 @@ from .base import BaseEmbeddingProvider
 from .chunker import chunk_text
 from .providers import PROVIDER_REGISTER
 from .config import MODEL_METADATA_REGISTRY
+from . import cache as embed_cache
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,8 @@ class EmbeddingPipeline:
         if self.model_meta is None:
             raise ValueError(f"{self.provider} & {self.provider.model_name} are not valid.")
 
+        self.cache_enabled = settings.embed_cache_enabled
+
     # ------------------------------------------------------------------
     # Discovery
     # ------------------------------------------------------------------
@@ -231,11 +234,7 @@ class EmbeddingPipeline:
         if not chunks_to_embed:
             return 0
 
-        logger.info(
-            "Generating vectors for %d %s chunks using Model=%s",
-            len(chunks_to_embed), source_type, self.provider.model_name,
-        )
-        vectors = self.provider.embed_batch(chunks_to_embed)
+        vectors = self._embed_with_cache(session, chunks_to_embed, max_words)
 
         embedding_objects = [
             SpeechEmbedding(
@@ -266,3 +265,54 @@ class EmbeddingPipeline:
             raise e
 
         return len(embedding_objects)
+
+    def _embed_with_cache(
+        self, session: Session, formatted_chunks: List[str], max_words: int
+    ) -> List[List[float]]:
+        """Return a vector per chunk, reusing cached vectors and embedding the rest.
+
+        Content-addressed on the exact embedded string + active model. Only the
+        cache misses hit the provider; freshly computed vectors are written back
+        (write-through) in the caller's transaction. With the cache disabled this
+        is a thin pass-through to ``embed_batch``.
+        """
+        if not self.cache_enabled:
+            logger.info(
+                "Generating vectors for %d chunks using Model=%s (cache off)",
+                len(formatted_chunks), self.provider.model_name,
+            )
+            return self.provider.embed_batch(formatted_chunks)
+
+        hashes = [embed_cache.hash_chunk(c) for c in formatted_chunks]
+        cached = embed_cache.lookup(session, self.provider.model_name, hashes)
+
+        miss_indices = [i for i, h in enumerate(hashes) if h not in cached]
+        logger.info(
+            "Embedding %d chunk(s) via Model=%s: %d cache hit(s), %d to compute.",
+            len(formatted_chunks), self.provider.model_name,
+            len(formatted_chunks) - len(miss_indices), len(miss_indices),
+        )
+
+        miss_vectors = (
+            self.provider.embed_batch([formatted_chunks[i] for i in miss_indices])
+            if miss_indices else []
+        )
+
+        vectors: List[List[float]] = [None] * len(formatted_chunks)
+        for i, h in enumerate(hashes):
+            if h in cached:
+                vectors[i] = cached[h]
+        for j, i in enumerate(miss_indices):
+            vectors[i] = miss_vectors[j]
+
+        if miss_indices:
+            embed_cache.store(
+                session,
+                self.provider.model_name,
+                [
+                    (hashes[i], vectors[i], len(formatted_chunks[i]))
+                    for i in miss_indices
+                ],
+                version=embed_cache.config_version(max_words),
+            )
+        return vectors
