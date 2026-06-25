@@ -266,6 +266,17 @@ class EmbeddingPipeline:
 
         return len(embedding_objects)
 
+    def backfill_cache(self, batch_size: int = 1000) -> Dict[str, int]:
+        """Seed the embedding cache from vectors already in ``speech_embeddings``.
+
+        One-off operational helper (see ``scripts/backfill_embedding_cache.py``):
+        every existing vector becomes a cache entry, so a later re-ingest/re-embed
+        reuses it instead of recomputing. Idempotent. Returns rows scanned per
+        model.
+        """
+        with self.SessionLocal() as session:
+            return embed_cache.populate_from_embeddings(session, batch_size=batch_size)
+
     def _embed_with_cache(
         self, session: Session, formatted_chunks: List[str], max_words: int
     ) -> List[List[float]]:

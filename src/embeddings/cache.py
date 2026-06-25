@@ -24,7 +24,8 @@ from typing import Dict, List, Sequence, Tuple
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from src.db.db_schema import EmbeddingCache as EmbeddingCacheRow
+from src.db.db_schema import EmbeddingCache as EmbeddingCacheRow, SpeechEmbedding
+from .config import MODEL_METADATA_REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -112,3 +113,73 @@ def store(
         stmt.on_conflict_do_nothing(index_elements=["text_hash", "model_name"])
     )
     return len(payload)
+
+
+def populate_from_embeddings(session: Session, batch_size: int = 1000) -> Dict[str, int]:
+    """Seed the cache from vectors already in ``speech_embeddings`` (one-off).
+
+    Reconstructs each row's embedded string as ``doc_prefix(model) + chunk_text``
+    — ``chunk_text`` already carries the speaker prefix, the pipeline only strips
+    the model ``doc_prefix`` before storing — hashes it, and writes the existing
+    vector under that content key. Idempotent via the write-through's
+    ``ON CONFLICT DO NOTHING``, so it is safe to re-run.
+
+    Assumes the stored vectors were produced with each model's *current*
+    ``doc_prefix``/chunking config — true unless that config changed since they
+    were embedded, in which case they would be re-embedded anyway (and the hash
+    would differ, so no false hit could result). Rows whose ``model_name`` is not
+    in the registry, or with no ``chunk_text``, are skipped.
+
+    Returns ``{model_name: rows_scanned}``.
+    """
+    models = [
+        m[0] for m in session.query(SpeechEmbedding.model_name).distinct().all() if m[0]
+    ]
+    scanned_by_model: Dict[str, int] = {}
+
+    for model_name in models:
+        meta = MODEL_METADATA_REGISTRY.get(model_name)
+        if meta is None:
+            logger.warning("Skipping unknown model in speech_embeddings: %s", model_name)
+            continue
+        doc_prefix = meta.get("doc_prefix") or ""
+        version = config_version(meta["max_chunk_words"])
+
+        scanned = 0
+        offset = 0
+        while True:
+            rows = (
+                session.query(
+                    SpeechEmbedding.chunk_text, SpeechEmbedding.embedding_vector
+                )
+                .filter(
+                    SpeechEmbedding.model_name == model_name,
+                    SpeechEmbedding.chunk_text.isnot(None),
+                )
+                .order_by(SpeechEmbedding.embedding_id)
+                .offset(offset)
+                .limit(batch_size)
+                .all()
+            )
+            if not rows:
+                break
+
+            # De-dup within the batch (identical chunk_text → identical hash):
+            # ON CONFLICT covers cross-batch repeats; this avoids a duplicate key
+            # inside a single INSERT.
+            entries_by_hash: Dict[str, Tuple[str, List[float], int]] = {}
+            for chunk_text, vector in rows:
+                formatted = f"{doc_prefix}{chunk_text}"
+                h = hash_chunk(formatted)
+                entries_by_hash.setdefault(h, (h, vector, len(formatted)))
+
+            store(session, model_name, list(entries_by_hash.values()), version)
+            session.commit()
+
+            scanned += len(rows)
+            offset += batch_size
+
+        scanned_by_model[model_name] = scanned
+        logger.info("Cache seed: scanned %d %s embedding(s).", scanned, model_name)
+
+    return scanned_by_model

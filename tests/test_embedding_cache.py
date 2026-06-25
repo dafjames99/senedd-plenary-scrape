@@ -39,6 +39,18 @@ def test_config_version_encodes_chunk_words():
     assert embed_cache.config_version(1200) == f"{embed_cache.CHUNK_CONFIG_VERSION}:mw1200"
 
 
+def test_seed_reconstruction_matches_pipeline_hash():
+    # The pipeline embeds `doc_prefix + speaker_prefix + chunk` but stores only
+    # `speaker_prefix + chunk` as chunk_text. The cache seed rebuilds the embedded
+    # string as `doc_prefix + chunk_text` — these must hash identically, or seeded
+    # vectors would never be hit on re-embed.
+    doc_prefix, speaker_prefix, chunk = "title: none | text: ", "Jones: ", "hello world"
+    pipeline_hash = embed_cache.hash_chunk(f"{doc_prefix}{speaker_prefix}{chunk}")
+    stored_chunk_text = f"{speaker_prefix}{chunk}"
+    seed_hash = embed_cache.hash_chunk(f"{doc_prefix}{stored_chunk_text}")
+    assert pipeline_hash == seed_hash
+
+
 # ---------------------------------------------------------------------------
 # Pipeline integration: cache lookup -> embed misses only -> write-through
 # ---------------------------------------------------------------------------
