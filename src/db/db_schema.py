@@ -1,5 +1,5 @@
 """SQLAlchemy models for Senedd speech pipeline."""
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, Index, event, text
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum, UniqueConstraint, Index, event, text, Float, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -192,6 +192,7 @@ class Speech(Base):
     speaker = relationship("Member", back_populates="speeches")
     parts = relationship("SpeechPart", back_populates="speech", cascade="all, delete-orphan")
     embeddings = relationship("SpeechEmbedding", back_populates="speech", cascade="all, delete-orphan")
+    fidelity = relationship("SpeechFidelity", back_populates="speech", uselist=False, cascade="all, delete-orphan")
 
 
 class SpeechPart(Base):
@@ -209,6 +210,43 @@ class SpeechPart(Base):
     verbatim_text = Column(Text)
 
     speech = relationship("Speech", back_populates="parts")
+
+
+class SpeechFidelity(Base):
+    """Derived per-speech transcript-fidelity signal (a QA artifact, not canonical).
+
+    Computed post-hoc from ``speeches``/``speech_parts`` by ``src/db/fidelity.py``,
+    not during speech reconstruction. A speech has no end time, so its duration is
+    the gap to the next speech's start within the same meeting; ``wpm`` is the
+    served ``speech_text`` word count over that duration. The cascade FK means a
+    reprocess that rebuilds speeches purges these rows too — the pass is idempotent
+    and simply re-run afterwards.
+
+    The raw metrics are retained alongside the derived ``flag``/``is_suspect`` so
+    consumers (or a later re-run) can re-derive thresholds without recomputing.
+    ``is_suspect`` is the single coarse signal the MCP surfaces to caveat a result;
+    ``flag`` carries the detail: ``ok | too_slow | too_fast | broken_timestamp |
+    low_confidence | no_duration``.
+    """
+    __tablename__ = "speech_fidelity"
+
+    speech_id = Column(
+        Integer,
+        ForeignKey("speeches.speech_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    word_count = Column(Integer)
+    duration_seconds = Column(Float)   # NULL for the last speech of a meeting
+    wpm = Column(Float)                # NULL when duration is unavailable / non-positive
+    ends_midsentence = Column(Boolean)  # text ends without terminal . ? ! — likely truncated
+
+    flag = Column(String(20), nullable=False, server_default="ok")
+    is_suspect = Column(Boolean, nullable=False, server_default=text("false"), index=True)
+
+    computed_at = Column(DateTime, default=datetime.now)
+
+    speech = relationship("Speech", back_populates="fidelity")
 
 
 class ProceduralEvent(Base):

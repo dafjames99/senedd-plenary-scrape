@@ -171,7 +171,14 @@ def senedd_get_speech(
 
     Returns JSON for {speech_id, speaker_id, speaker_name, meeting_id,
     meeting_date, agenda_item_id, agenda_item_english, speech_language,
-    speech_text, source_row_count, senedd_tv_url}, or an error if not found.
+    speech_text, source_row_count, senedd_tv_url, is_suspect, fidelity_flag,
+    wpm}, or an error if not found.
+
+    is_suspect flags a transcript-fidelity concern: the speech's text-to-time
+    relationship is anomalous (fidelity_flag detail: too_slow / broken_timestamp /
+    etc.), so the recorded text may be incomplete or the timestamps unreliable.
+    When is_suspect is true, treat the text with caution and verify against the
+    senedd_tv_url recording before relying on it.
     """
     try:
         speech = lookups.get_speech(speech_id)

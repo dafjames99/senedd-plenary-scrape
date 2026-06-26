@@ -33,6 +33,11 @@ python scripts/query_speeches.py "climate policy" --limit 10 --min-similarity 60
 python scripts/backfill.py --start 2024-01-01 --end 2024-06-30 --action all
 python scripts/backfill.py --start 2024-01-01 --action harvest  # scrape to CSV only
 python scripts/backfill.py --start 2024-01-01 --action ingest   # load from existing CSV
+
+# Transcript-fidelity QA (run after ingest/reprocess; not part of the pipeline)
+python -m src.db.fidelity                 # compute + persist per-speech flags
+python -m src.db.fidelity --dry-run       # report only, no write
+python analysis/wpm_fidelity.py           # read-only charts + suspect CSV (speech level)
 ```
 
 ## Configuration
@@ -90,6 +95,10 @@ Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m
 ### Semantic search
 
 `scripts/query_speeches.py` embeds the query using the active provider, then runs a PostgreSQL CTE that ranks all chunks per speech by cosine distance (`<=>` from pgvector) and returns the best-matching chunk per speech. Speaker filtering uses parameterized `ILIKE` to avoid injection.
+
+### Transcript fidelity (QA)
+
+`src/db/fidelity.py` is a derived, on-demand QA pass (not a pipeline phase) that scores each speech for transcript fidelity into the `speech_fidelity` table. Duration is the gap to the next speech's start within the meeting; `wpm` is the served `speech_text` word count over that duration. It is computed at **speech** level deliberately — contribution level is dominated by an interjection artifact (a brief interjection's near-identical timestamp collapses the inferred duration). Two complementary signals: WPM (`flag`: `too_slow`/`too_fast`/`broken_timestamp`/`low_confidence`/`no_duration`/`ok`) and `ends_midsentence` — though em-dash *interruptions* are treated as terminal (the corpus marks them cleanly), so that signal mostly confirms well-formed boundaries rather than finding truncations. `is_suspect` is the coarse consumer flag, surfaced by the MCP's `senedd_get_speech` (joined in `src/search/lookups.py`) so an answer can be caveated. The table has a cascade FK to `speeches`, so a reprocess purges it — **re-run `python -m src.db.fidelity` after ingest/reprocess**. `analysis/wpm_fidelity.py` is the read-only visual companion (charts + suspect CSV; `--level contribution` shows the artifact). It is a *measurement*, not a remediation: missing source text cannot be recovered.
 
 ### SQL procedures
 
