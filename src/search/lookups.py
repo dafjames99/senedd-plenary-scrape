@@ -49,6 +49,13 @@ class SpeechDetail:
     speech_text: str
     source_row_count: Optional[int]
     senedd_tv_url: Optional[str]
+    # Transcript-fidelity signal (from speech_fidelity; None if not yet computed).
+    # is_suspect flags an anomalous text/time relationship — possible truncation,
+    # interruption, or non-speech time in the gap — so a consumer can caveat the
+    # quote. fidelity_flag carries the detail; wpm is the inferred speaking rate.
+    is_suspect: Optional[bool] = None
+    fidelity_flag: Optional[str] = None
+    wpm: Optional[float] = None
 
 
 @dataclass
@@ -212,9 +219,11 @@ def get_speech(speech_id: int) -> Optional[SpeechDetail]:
                 AND r.agenda_item_english IS NOT NULL LIMIT 1) AS agenda_item_english,
             (SELECT sp.spoken_url FROM speech_parts sp
               WHERE sp.speech_id = s.speech_id AND sp.spoken_url IS NOT NULL
-              ORDER BY sp.contribution_order_id ASC LIMIT 1) AS senedd_tv_url
+              ORDER BY sp.contribution_order_id ASC LIMIT 1) AS senedd_tv_url,
+            f.is_suspect, f.flag AS fidelity_flag, f.wpm
         FROM speeches s
         JOIN meetings m ON s.meeting_id = m.meeting_id
+        LEFT JOIN speech_fidelity f ON f.speech_id = s.speech_id
         WHERE s.speech_id = :speech_id
     """)
     with _session() as session:
@@ -233,6 +242,9 @@ def get_speech(speech_id: int) -> Optional[SpeechDetail]:
         speech_text=row.speech_text,
         source_row_count=row.source_row_count,
         senedd_tv_url=row.senedd_tv_url,
+        is_suspect=row.is_suspect,
+        fidelity_flag=row.fidelity_flag,
+        wpm=row.wpm,
     )
 
 
