@@ -20,8 +20,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from src import setup_logging, settings
+from src.db.acquisition import AcquisitionPipeline
 from src.db.fetcher import DataFetcher, Meeting
-from src.db.pipeline import SeneddPipeline
+from src.db.transformation import TransformationPipeline
 
 logger = logging.getLogger(__name__)
 
@@ -122,8 +123,13 @@ def ingest_meetings_to_db(meetings: list[Meeting]) -> bool:
         
     logger.info(f"[*] Initializing pipeline database sync for {len(meetings)} meetings...")
     try:
-        pipeline = SeneddPipeline(settings.database_url)
-        pipeline.run_for_meetings(meetings, keep_xml=False)
+        acquisition = AcquisitionPipeline(settings.database_url)
+        transformation = TransformationPipeline(settings.database_url)
+        # Raw ingest (transcript + Votes/QNR), then rebuild derived tables for the
+        # meetings that were ingested.
+        ingested_ids = acquisition.acquire_meetings(meetings, keep_xml=False)
+        if ingested_ids:
+            transformation.transform_meetings(ingested_ids)
         return True
     except Exception as e:
         logger.error(f"[!] Fatal pipeline break encountered during backfill migration: {e}")

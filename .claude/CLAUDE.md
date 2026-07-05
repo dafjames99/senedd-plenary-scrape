@@ -16,14 +16,21 @@ uv sync --extra sentence-transformer  # sentence-transformers provider
 uv run pytest tests/
 uv run pytest tests/test_semantic_search.py::test_query_prefix_applied  # single test
 
-# Run the pipeline
-python main.py                      # incremental sync (default)
-python main.py --force              # full rebuild from XML (drops all tables)
+# Run the pipeline (local dev — main.py composes the three stages end-to-end)
+python main.py                      # incremental sync (default): raw acquisition + transform + embed
+python main.py --force              # full rebuild from XML (drops all data; schema preserved)
 python main.py --mode embed-only    # embedding sweep only
 python main.py --mode embed-only --force  # wipe and re-embed for active model
 python main.py --mode reprocess     # re-run downstream phases from existing raw_contributions (no network)
 python main.py --embed-loop         # loop embedding until all speeches are embedded
 python main.py -i                   # interactive prompt between embedding batches
+
+# Run the pipeline stages independently (each concern is its own module + entry point)
+python -m src.db.acquisition        # RAW only: fetch + XML → source-of-truth tables (no derived)
+python -m src.db.transformation     # DERIVED only: rebuild from raw (auto-discovers meetings needing it)
+python -m src.db.transformation --all           # purge_downstream + full rebuild from raw
+python -m src.db.transformation --meetings 123,456  # transform specific meeting IDs
+python -m src.embeddings.embed --loop           # embedding sweep only (run manually)
 
 # Semantic search
 python scripts/query_speeches.py "NHS waiting times"
@@ -58,21 +65,39 @@ Copy `.env` and set:
 
 ## Architecture
 
-### Two pipelines
+### Pipeline stages (three separated concerns)
 
-**`SeneddPipeline`** (`src/db/pipeline.py`) — ingests Senedd XML and reconstructs speeches.
+The former monolithic `SeneddPipeline` has been split along the raw→derived seam
+(the same seam codified by `purge_downstream_tables`). Each stage is independently
+runnable, so raw ingest and derived rebuild can be scheduled/reasoned about apart.
+Schema provisioning (`src/db/provisioning.py`, Alembic + procedures) and the shared
+session factory (`src/db/session.py`, `get_session`) back all stages. A thin
+deprecated `SeneddPipeline` facade remains in `src/db/pipeline.py` for compat.
 
-Six sequential phases per meeting (all run atomically per `meeting_id`):
-1. **Ingest XML** → `raw_contributions`, `meetings`, `members` (idempotent upserts)
-2. **Clean & classify** → `clean_contributions`, `classified_contributions`, `oral_questions`
-3. *(part of phase 2)*
-4. **Reconstruct speeches** → `speeches`, `speech_parts` — boundary = speaker change OR agenda item change; prefers English translation over verbatim Welsh
-5. **Build dimensions** → `members`, `member_job_titles`
-6. **Build procedural events** → `procedural_events`
+**1. `AcquisitionPipeline`** (`src/db/acquisition.py`) — **RAW only, network + XML.**
+Writes source-of-truth tables only: `raw_contributions`, `meetings`, `members`,
+`votes`, `vote_records`, `written_contributions`, plus operational
+`sync_checkpoints` / `artifact_watch`. Never builds a derived table.
+- `ingest_xml` / `ingest_votes` / `ingest_qnr` — idempotent upserts per artifact.
+- `run_incremental(...)` — detect new transcripts, raw-ingest, register + sweep
+  Votes/QNR watches, checkpoint. Returns the ingested meeting IDs.
+- `acquire_meetings(...)` — explicit-list backfill (transcript + Votes/QNR in one pass).
+
+**2. `TransformationPipeline`** (`src/db/transformation.py`) — **DERIVED only, no network.**
+Reads raw, rebuilds derived tables per meeting (all atomic per `meeting_id`):
+1. **Clean & classify** → `clean_contributions`, `classified_contributions`, `oral_questions`
+2. **Reconstruct speeches** → `speeches`, `speech_parts` — boundary = speaker change OR agenda item change; prefers English translation over verbatim Welsh
+3. **Build dimensions** → `members`, `member_job_titles`
+4. **Build procedural events** → `procedural_events`
+- `transform_meetings(ids=None)` — transform given meetings; with `None`,
+  auto-discovers meetings that have raw contributions but no speeches yet.
+- `reprocess_all(...)` — `purge_downstream_tables` then rebuild every meeting from raw.
+- Depends only on `raw_contributions` (the transcript), never on Votes/QNR — so a
+  *late* Votes/QNR attachment needs only re-embedding, not re-transform.
 
 Cascade FK constraints (`ondelete="CASCADE"`) make reprocessing safe — re-running a meeting purges its existing speeches automatically.
 
-**`EmbeddingPipeline`** (`src/embeddings/pipeline.py`) — chunks speeches, embeds them, stores vectors.
+**3. `EmbeddingPipeline`** (`src/embeddings/pipeline.py`) — chunks speeches, embeds them, stores vectors.
 
 - Skips speeches under 10 words
 - Prepends `"<speaker_name>: "` to each chunk before embedding
