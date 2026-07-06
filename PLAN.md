@@ -184,6 +184,12 @@ without migrations. Both come first.
 
 ## Phase 5 — Production + demo
 
+> **Actioned plan: see `PRODUCTION.md`** (2026-07) — researched host choices
+> (Neon + GitHub Actions cron + Render), the fixed-dim/HNSW indexing
+> migration, rollout sequence, and costs. The embedding-recipe decision is
+> gated on the experiment framework (`experiments/README.md`). Workflows for
+> CI / scheduled sync / eval live in `.github/workflows/`.
+
 - [ ] Neon (cloud Postgres). Set `EMBEDDING_MODEL=openai/text-embedding-3-small`.
 - [ ] One-time **bulk re-embed** against OpenAI into a **fixed-dim column + HNSW index**.
       (Local dev stays on gemma — coexist by `model_name`; pure config switch.)

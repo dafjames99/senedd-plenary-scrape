@@ -16,7 +16,7 @@ from typing import List, Optional
 from sqlalchemy import text
 
 from src.db.db_schema import QaRoleEnum, VoteResultEnum
-from src.db.pipeline import SeneddPipeline
+from src.db.session import get_session
 from src.db.settings import settings
 from src.search._dates import DateLike, coerce_datetime
 
@@ -27,7 +27,7 @@ _EXCERPT_CHARS = 240
 
 def _session():
     """Open a session bound to the configured database."""
-    return SeneddPipeline(settings.database_url).SessionLocal()
+    return get_session(settings.database_url)
 
 
 # ---------------------------------------------------------------------------

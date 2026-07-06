@@ -526,9 +526,9 @@ def corpus_stats() -> str:
     """Live corpus coverage: counts, date range, and the active embedding model."""
     from sqlalchemy import text as _text
 
-    from src.db.pipeline import SeneddPipeline
+    from src.db.session import get_session
 
-    with SeneddPipeline(settings.database_url).SessionLocal() as session:
+    with get_session(settings.database_url) as session:
         speeches = session.execute(_text("SELECT COUNT(*) FROM speeches")).scalar()
         meetings = session.execute(_text("SELECT COUNT(*) FROM meetings")).scalar()
         members = session.execute(_text("SELECT COUNT(*) FROM members")).scalar()

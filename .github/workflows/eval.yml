@@ -1,0 +1,51 @@
+name: Retrieval eval
+
+# Manual scoreboard: run the labelled eval cases (tests/eval/cases.yaml)
+# against a live database + embedding provider and publish the metrics as a
+# run artifact. Use it to (a) re-baseline after a model/chunking change is
+# promoted to production, and (b) verify zero regression after refactors.
+# The recorded reference baseline lives in tests/eval/BASELINE.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      depth:
+        description: "Retrieval depth (top-k fetched per query)"
+        default: "20"
+      provider:
+        description: "Override embedding provider (blank = repo variable/default)"
+        default: ""
+      model:
+        description: "Override embedding model (blank = repo variable/default)"
+        default: ""
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'openai' }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'text-embedding-3-small' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra openai
+
+      - name: Run eval cases
+        run: |
+          ARGS="--k ${{ inputs.depth }} --json eval-results.json"
+          if [ -n "${{ inputs.provider }}" ]; then ARGS="$ARGS --provider ${{ inputs.provider }}"; fi
+          if [ -n "${{ inputs.model }}" ]; then ARGS="$ARGS --model ${{ inputs.model }}"; fi
+          uv run python -m tests.eval.runner $ARGS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: eval-results.json

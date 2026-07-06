@@ -1,0 +1,12 @@
+# Hypothesis: the best-chunk-per-speech CTE already collapses to one hit per
+# speech, so embedding each speech as ONE vector (up to the model's context
+# cap) may lose little quality while cutting vector count and query cost.
+provider: ollama
+model: embeddinggemma:300m
+chunk_strategy: whole-item
+min_item_words: 10
+speaker_prefix: true
+notes: >
+  One vector per speech (speeches beyond the 1200-word cap still split — the
+  context limit is physical). Cheapest storage/query profile; the question is
+  how much MRR it gives up on long speeches.

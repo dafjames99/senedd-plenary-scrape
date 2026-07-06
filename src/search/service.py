@@ -18,7 +18,7 @@ from typing import Dict, List, Optional
 
 from sqlalchemy import text
 
-from src.db.pipeline import SeneddPipeline
+from src.db.session import get_session
 from src.db.settings import settings
 from src.embeddings.config import MODEL_METADATA_REGISTRY
 from src.embeddings.providers import PROVIDER_REGISTER
@@ -242,8 +242,6 @@ def semantic_search(
     logger.info("Embedding query with model '%s': '%s'", provider.model_name, prefixed_query)
     query_vector = provider.embed_batch([prefixed_query])[0]
 
-    pipeline = SeneddPipeline(settings.database_url)
-
     # Shared bound parameters. Per-source `source_type` is hardcoded in each CTE's
     # join (not user-supplied); every user value is bound separately.
     base_params: dict = {
@@ -291,7 +289,7 @@ def semantic_search(
     }
 
     rows: list = []
-    with pipeline.SessionLocal() as session:
+    with get_session(settings.database_url) as session:
         for source_type in requested:
             # Votes carry no speaker — a speaker filter excludes them entirely.
             if source_type == "vote" and speaker_filter:

@@ -16,14 +16,21 @@ uv sync --extra sentence-transformer  # sentence-transformers provider
 uv run pytest tests/
 uv run pytest tests/test_semantic_search.py::test_query_prefix_applied  # single test
 
-# Run the pipeline
-python main.py                      # incremental sync (default)
-python main.py --force              # full rebuild from XML (drops all tables)
+# Run the pipeline (local dev — main.py composes the three stages end-to-end)
+python main.py                      # incremental sync (default): raw acquisition + transform + embed
+python main.py --force              # full rebuild from XML (drops all data; schema preserved)
 python main.py --mode embed-only    # embedding sweep only
 python main.py --mode embed-only --force  # wipe and re-embed for active model
 python main.py --mode reprocess     # re-run downstream phases from existing raw_contributions (no network)
 python main.py --embed-loop         # loop embedding until all speeches are embedded
 python main.py -i                   # interactive prompt between embedding batches
+
+# Run the pipeline stages independently (each concern is its own module + entry point)
+python -m src.db.acquisition        # RAW only: fetch + XML → source-of-truth tables (no derived)
+python -m src.db.transformation     # DERIVED only: rebuild from raw (auto-discovers meetings needing it)
+python -m src.db.transformation --all           # purge_downstream + full rebuild from raw
+python -m src.db.transformation --meetings 123,456  # transform specific meeting IDs
+python -m src.embeddings.embed --loop           # embedding sweep only (run manually)
 
 # Semantic search
 python scripts/query_speeches.py "NHS waiting times"
@@ -38,6 +45,15 @@ python scripts/backfill.py --start 2024-01-01 --action ingest   # load from exis
 python -m src.db.fidelity                 # compute + persist per-speech flags
 python -m src.db.fidelity --dry-run       # report only, no write
 python analysis/wpm_fidelity.py           # read-only charts + suspect CSV (speech level)
+
+# Embedding experiments (see experiments/README.md for the full procedure)
+python -m src.experiments.runner --config experiments/configs/baseline-gemma.yaml
+python -m src.experiments.runner --config ... --limit 100   # wiring smoke test (flagged partial)
+python -m src.experiments.runner --list                     # experiment namespaces in the DB
+python -m src.experiments.runner --purge exp:name-hash8     # drop one experiment's vectors
+
+# Retrieval eval scoreboard (live stack; recorded baseline in tests/eval/BASELINE.md)
+python -m tests.eval.runner
 ```
 
 ## Configuration
@@ -58,21 +74,39 @@ Copy `.env` and set:
 
 ## Architecture
 
-### Two pipelines
+### Pipeline stages (three separated concerns)
 
-**`SeneddPipeline`** (`src/db/pipeline.py`) — ingests Senedd XML and reconstructs speeches.
+The former monolithic `SeneddPipeline` has been split along the raw→derived seam
+(the same seam codified by `purge_downstream_tables`). Each stage is independently
+runnable, so raw ingest and derived rebuild can be scheduled/reasoned about apart.
+Schema provisioning (`src/db/provisioning.py`, Alembic + procedures) and the shared
+session factory (`src/db/session.py`, `get_session`) back all stages. A thin
+deprecated `SeneddPipeline` facade remains in `src/db/pipeline.py` for compat.
 
-Six sequential phases per meeting (all run atomically per `meeting_id`):
-1. **Ingest XML** → `raw_contributions`, `meetings`, `members` (idempotent upserts)
-2. **Clean & classify** → `clean_contributions`, `classified_contributions`, `oral_questions`
-3. *(part of phase 2)*
-4. **Reconstruct speeches** → `speeches`, `speech_parts` — boundary = speaker change OR agenda item change; prefers English translation over verbatim Welsh
-5. **Build dimensions** → `members`, `member_job_titles`
-6. **Build procedural events** → `procedural_events`
+**1. `AcquisitionPipeline`** (`src/db/acquisition.py`) — **RAW only, network + XML.**
+Writes source-of-truth tables only: `raw_contributions`, `meetings`, `members`,
+`votes`, `vote_records`, `written_contributions`, plus operational
+`sync_checkpoints` / `artifact_watch`. Never builds a derived table.
+- `ingest_xml` / `ingest_votes` / `ingest_qnr` — idempotent upserts per artifact.
+- `run_incremental(...)` — detect new transcripts, raw-ingest, register + sweep
+  Votes/QNR watches, checkpoint. Returns the ingested meeting IDs.
+- `acquire_meetings(...)` — explicit-list backfill (transcript + Votes/QNR in one pass).
+
+**2. `TransformationPipeline`** (`src/db/transformation.py`) — **DERIVED only, no network.**
+Reads raw, rebuilds derived tables per meeting (all atomic per `meeting_id`):
+1. **Clean & classify** → `clean_contributions`, `classified_contributions`, `oral_questions`
+2. **Reconstruct speeches** → `speeches`, `speech_parts` — boundary = speaker change OR agenda item change; prefers English translation over verbatim Welsh
+3. **Build dimensions** → `members`, `member_job_titles`
+4. **Build procedural events** → `procedural_events`
+- `transform_meetings(ids=None)` — transform given meetings; with `None`,
+  auto-discovers meetings that have raw contributions but no speeches yet.
+- `reprocess_all(...)` — `purge_downstream_tables` then rebuild every meeting from raw.
+- Depends only on `raw_contributions` (the transcript), never on Votes/QNR — so a
+  *late* Votes/QNR attachment needs only re-embedding, not re-transform.
 
 Cascade FK constraints (`ondelete="CASCADE"`) make reprocessing safe — re-running a meeting purges its existing speeches automatically.
 
-**`EmbeddingPipeline`** (`src/embeddings/pipeline.py`) — chunks speeches, embeds them, stores vectors.
+**3. `EmbeddingPipeline`** (`src/embeddings/pipeline.py`) — chunks speeches, embeds them, stores vectors.
 
 - Skips speeches under 10 words
 - Prepends `"<speaker_name>: "` to each chunk before embedding
@@ -87,6 +121,10 @@ Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m
 ### Embedding cache
 
 `src/embeddings/cache.py` is a content-addressed cache (`embedding_cache` table) keyed on `sha256(formatted_chunk)` + `model_name`, where `formatted_chunk` is the exact string sent to the provider (`doc_prefix + speaker_prefix + chunk`). The pipeline embeds only cache misses and writes computed vectors back in the same transaction. It has **no FK to `speeches`**, so it survives the delete-and-rebuild of speeches on re-ingest — a backfill re-run (or a reverted chunking experiment) reuses every vector instead of recomputing it. `embed_config_version` is provenance only; correctness rides on the hash. A dev aid (disable via `EMBED_CACHE_ENABLED=false` in prod); wipe with `CALL purge_embedding_cache(...)`.
+
+### Embedding experiments
+
+`src/experiments/` is a config-driven harness for comparing chunking/model recipes (`experiments/configs/*.yaml`). Each run embeds the speech corpus under an isolated namespace — `model_name = "exp:<name>-<confighash8>"` in `speech_embeddings`, invisible to production search — then scores it against the labelled cases in `tests/eval/cases.yaml` using the production ranking CTE with the config's own `query_prefix` (doc/query symmetry per experiment). Quality (MRR, hit@k, recall@k), performance (embed throughput, query latency p50/p95) and storage are appended to `experiments/runs.jsonl` and ranked in the auto-generated `experiments/RESULTS.md`; both are committed. The embedding cache is keyed on the provider's *real* model name, so experiments share vectors with production and each other. Procedure, comparability rules, and the promotion path are in `experiments/README.md`.
 
 ### Incremental sync
 

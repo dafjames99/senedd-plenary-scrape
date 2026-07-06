@@ -1,0 +1,15 @@
+# Hypothesis: 1200-word windows dilute topical signal — most speeches embed as
+# a single chunk whose vector averages several topics. Tighter windows should
+# sharpen chunk-level matching, at the cost of more vectors (storage + slower
+# scans) and less context per chunk.
+provider: ollama
+model: embeddinggemma:300m
+chunk_strategy: sentence-window
+chunk_max_words: 200
+chunk_overlap_words: 40
+chunk_min_words: 20
+min_item_words: 10
+speaker_prefix: true
+notes: >
+  Small sentence windows (200/40). Expect MRR gain on long multi-topic
+  speeches; watch vector count and search latency.

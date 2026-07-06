@@ -78,9 +78,12 @@ class Settings(BaseSettings):
             provider = "sentence-transformers"
 
         # Construct the look-up key used in your registry (e.g., 'openai/text-embedding-3-small')
+        # Registry keys are case-sensitive (e.g. 'all-MiniLM-L6-v2'), so match
+        # case-insensitively rather than against the lowercased key.
         registry_key = f"{provider}/{model}"
+        canonical = {k.lower(): k for k in MODEL_METADATA_REGISTRY}
 
-        if registry_key not in MODEL_METADATA_REGISTRY:
+        if registry_key not in canonical:
             available_keys = ", ".join(MODEL_METADATA_REGISTRY.keys())
             raise ValueError(
                 f"The combination '{registry_key}' was not found in the MODEL_METADATA_REGISTRY.\n"
