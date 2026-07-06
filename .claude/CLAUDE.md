@@ -45,6 +45,15 @@ python scripts/backfill.py --start 2024-01-01 --action ingest   # load from exis
 python -m src.db.fidelity                 # compute + persist per-speech flags
 python -m src.db.fidelity --dry-run       # report only, no write
 python analysis/wpm_fidelity.py           # read-only charts + suspect CSV (speech level)
+
+# Embedding experiments (see experiments/README.md for the full procedure)
+python -m src.experiments.runner --config experiments/configs/baseline-gemma.yaml
+python -m src.experiments.runner --config ... --limit 100   # wiring smoke test (flagged partial)
+python -m src.experiments.runner --list                     # experiment namespaces in the DB
+python -m src.experiments.runner --purge exp:name-hash8     # drop one experiment's vectors
+
+# Retrieval eval scoreboard (live stack; recorded baseline in tests/eval/BASELINE.md)
+python -m tests.eval.runner
 ```
 
 ## Configuration
@@ -112,6 +121,10 @@ Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m
 ### Embedding cache
 
 `src/embeddings/cache.py` is a content-addressed cache (`embedding_cache` table) keyed on `sha256(formatted_chunk)` + `model_name`, where `formatted_chunk` is the exact string sent to the provider (`doc_prefix + speaker_prefix + chunk`). The pipeline embeds only cache misses and writes computed vectors back in the same transaction. It has **no FK to `speeches`**, so it survives the delete-and-rebuild of speeches on re-ingest — a backfill re-run (or a reverted chunking experiment) reuses every vector instead of recomputing it. `embed_config_version` is provenance only; correctness rides on the hash. A dev aid (disable via `EMBED_CACHE_ENABLED=false` in prod); wipe with `CALL purge_embedding_cache(...)`.
+
+### Embedding experiments
+
+`src/experiments/` is a config-driven harness for comparing chunking/model recipes (`experiments/configs/*.yaml`). Each run embeds the speech corpus under an isolated namespace — `model_name = "exp:<name>-<confighash8>"` in `speech_embeddings`, invisible to production search — then scores it against the labelled cases in `tests/eval/cases.yaml` using the production ranking CTE with the config's own `query_prefix` (doc/query symmetry per experiment). Quality (MRR, hit@k, recall@k), performance (embed throughput, query latency p50/p95) and storage are appended to `experiments/runs.jsonl` and ranked in the auto-generated `experiments/RESULTS.md`; both are committed. The embedding cache is keyed on the provider's *real* model name, so experiments share vectors with production and each other. Procedure, comparability rules, and the promotion path are in `experiments/README.md`.
 
 ### Incremental sync
 

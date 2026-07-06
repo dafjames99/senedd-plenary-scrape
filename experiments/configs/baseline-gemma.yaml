@@ -1,0 +1,16 @@
+# Reproduces current production behaviour exactly: gemma embeddings,
+# sentence-window chunking at the model's context cap (1200 words), 50-word
+# overlap, speaker prefix, registry doc/query prefixes. Run this FIRST on any
+# corpus you experiment against — it is the control every other run is
+# compared to, and its numbers should match tests/eval/BASELINE.md.
+provider: ollama
+model: embeddinggemma:300m
+chunk_strategy: sentence-window
+chunk_max_words: null        # registry default (1200)
+chunk_overlap_words: 50
+chunk_min_words: 20
+min_item_words: 10
+speaker_prefix: true
+notes: >
+  Control run. Mirrors the production embedding pipeline configuration so the
+  leaderboard has an anchor comparable to the recorded BASELINE.md metrics.

@@ -1,0 +1,16 @@
+# The production candidate model (PLAN.md Phase 5 / PRODUCTION.md). Registry
+# defaults: 8k-token context (4000-word cap), no instruction prefixes.
+# Requires OPENAI_API_KEY. Costs cents on the current corpus (~1M tokens at
+# $0.02/1M for text-embedding-3-small).
+provider: openai
+model: text-embedding-3-small
+chunk_strategy: sentence-window
+chunk_max_words: null        # registry default (4000)
+chunk_overlap_words: 50
+chunk_min_words: 20
+min_item_words: 10
+speaker_prefix: true
+notes: >
+  Production-candidate control: text-embedding-3-small with production-shaped
+  chunking. Compare against baseline-gemma before committing the Phase 5
+  re-embed; then sweep chunk sizes for this model specifically.
