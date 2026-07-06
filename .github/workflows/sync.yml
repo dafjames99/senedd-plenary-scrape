@@ -1,0 +1,68 @@
+name: Scheduled data sync
+
+# Incremental production sync: fetch new transcripts, transform, embed, QA.
+# GitHub Actions is the production scheduler (see PRODUCTION.md) — the pipeline
+# is a batch job with no always-on component, so a cron workflow against the
+# managed Postgres is the whole ingestion deployment.
+#
+# Disabled until production exists: set the repository variable SYNC_ENABLED to
+# 'true' (Settings → Secrets and variables → Actions → Variables) to arm the
+# schedule. Manual runs via workflow_dispatch work regardless.
+#
+# Required repository secrets:
+#   DATABASE_URL     — production Postgres URL (read-write ingest role)
+#   OPENAI_API_KEY   — if the production embedding provider is openai
+# Optional repository variables:
+#   EMBEDDING_PROVIDER / EMBEDDING_MODEL — default to the production choice below.
+
+on:
+  schedule:
+    # Plenary sits Tue/Wed; transcripts publish within ~24h and Votes/QNR can
+    # trail by up to two days (swept by artifact_watch). Run Tue–Fri evenings.
+    - cron: "0 19 * * 2-5"
+  workflow_dispatch:
+    inputs:
+      embed_only:
+        description: "Skip acquisition/transform; run the embedding sweep only"
+        type: boolean
+        default: false
+
+concurrency:
+  group: senedd-data-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.event_name == 'workflow_dispatch' || vars.SYNC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'openai' }}
+      EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL || 'text-embedding-3-small' }}
+      # No backfill re-runs in prod — skip the cache write path and table growth.
+      EMBED_CACHE_ENABLED: "false"
+      LOG_LEVEL: INFO
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra openai
+
+      - name: Incremental sync + embedding sweep
+        if: ${{ !inputs.embed_only }}
+        run: uv run python main.py --embed-loop
+
+      - name: Embedding sweep only
+        if: ${{ inputs.embed_only }}
+        run: uv run python main.py --mode embed-only --embed-loop
+
+      # speech_fidelity has a cascade FK to speeches, so any reprocess/re-ingest
+      # purges it — recompute after every sync (idempotent).
+      - name: Transcript-fidelity QA pass
+        run: uv run python -m src.db.fidelity

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Lint + offline test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # Errors-only lint: syntax errors, undefined names, malformed asserts.
+      # Deliberately not a style gate — widen the rule set only by team decision.
+      - name: Lint (ruff, errors only)
+        run: uvx ruff check --select E9,F63,F7,F82 .
+
+      # The suite is fully mocked — no database, network, or GPU required.
+      - name: Run tests
+        run: uv run pytest tests/ -q
+
+  migrations:
+    name: Migration round-trip (pgvector)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: senedd
+          POSTGRES_PASSWORD: senedd
+          POSTGRES_DB: senedd_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U senedd"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg2://senedd:senedd@localhost:5432/senedd_ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      # Full provisioning path: alembic upgrade head + register SQL procedures —
+      # the same code path production setup uses (src/db/provisioning.py).
+      - name: Provision schema from migrations
+        run: |
+          uv run python -c "
+          import os
+          from src.db.provisioning import Provisioner
+          Provisioner(os.environ['DATABASE_URL']).create_schema()
+          "
+
+      # Every migration must round-trip: downgrade to base and rebuild to head.
+      - name: Downgrade to base and re-upgrade
+        run: |
+          uv run alembic downgrade base
+          uv run alembic upgrade head
