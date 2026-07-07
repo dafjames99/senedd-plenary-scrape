@@ -15,9 +15,21 @@ ENV_PATH = ROOT_DIR / ".env"
 class Settings(BaseSettings):
     # --- Database Settings ---
     database_url: str = Field(
-        default="sqlite:///./sqlite_database.db", 
+        default="sqlite:///./sqlite_database.db",
         alias="DATABASE_URL"
     )
+
+    # --- Read-only consumer role (web app + MCP) ---
+    # The pipeline connects as the schema owner (writes). Read-only consumers
+    # (the Next.js app and the MCP server) connect through a SELECT-only role so
+    # a bug or injection in a read path is contained by the database, not just by
+    # code review. ``provision_readonly_role`` creates/refreshes the role from
+    # ``readonly_role`` / ``readonly_password``; read-only consumers connect via
+    # ``read_database_url`` (falls back to ``database_url`` when no dedicated URL
+    # is set, e.g. local sqlite dev without a provisioned role).
+    readonly_role: str = Field(default="senedd_ro", alias="READONLY_DB_ROLE")
+    readonly_password: Optional[str] = Field(default=None, alias="READONLY_DB_PASSWORD")
+    readonly_database_url: Optional[str] = Field(default=None, alias="DATABASE_URL_RO")
 
     # --- Core Embedding Strategy ---
     embedding_provider: str = Field(
@@ -97,6 +109,15 @@ class Settings(BaseSettings):
 
         return self
     
+    @property
+    def read_database_url(self) -> str:
+        """Connection URL for read-only consumers (MCP, retrieval service).
+
+        Falls back to the primary ``database_url`` when no dedicated read-only
+        URL is configured (e.g. local sqlite dev without a provisioned role).
+        """
+        return self.readonly_database_url or self.database_url
+
     @property
     def embedding_metadata(self) -> Dict[str, Any]:
         """

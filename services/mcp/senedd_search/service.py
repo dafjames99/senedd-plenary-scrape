@@ -289,7 +289,7 @@ def semantic_search(
     }
 
     rows: list = []
-    with get_session(settings.database_url) as session:
+    with get_session(settings.read_database_url) as session:
         for source_type in requested:
             # Votes carry no speaker — a speaker filter excludes them entirely.
             if source_type == "vote" and speaker_filter:

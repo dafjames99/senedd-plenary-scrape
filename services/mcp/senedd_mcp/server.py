@@ -522,7 +522,7 @@ def corpus_stats() -> str:
 
     from senedd_data.session import get_session
 
-    with get_session(settings.database_url) as session:
+    with get_session(settings.read_database_url) as session:
         speeches = session.execute(_text("SELECT COUNT(*) FROM speeches")).scalar()
         meetings = session.execute(_text("SELECT COUNT(*) FROM meetings")).scalar()
         members = session.execute(_text("SELECT COUNT(*) FROM members")).scalar()

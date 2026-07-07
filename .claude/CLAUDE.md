@@ -78,7 +78,10 @@ Copy `.env` and set:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./sqlite_database.db` | Use PostgreSQL URL in practice |
+| `DATABASE_URL` | `sqlite:///./sqlite_database.db` | Owner/write URL (pipeline + Alembic). Use PostgreSQL URL in practice |
+| `DATABASE_URL_RO` | — | SELECT-only URL for read-only consumers (MCP via `settings.read_database_url`; falls back to `DATABASE_URL`). Web app uses `apps/web/.env` |
+| `READONLY_DB_ROLE` | `senedd_ro` | Read-only login role `make provision` creates/grants (Postgres only) |
+| `READONLY_DB_PASSWORD` | — | Password set on `READONLY_DB_ROLE` during provisioning |
 | `EMBEDDING_PROVIDER` | `sentence-transformer` | `sentence-transformer`, `ollama`, `openai` |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Must match a key in `MODEL_METADATA_REGISTRY` |
 | `OLLAMA_URL` | `http://localhost:11434` | Required if using `ollama` provider |

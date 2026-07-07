@@ -20,9 +20,9 @@ eval_*.json
 # Analysis artifacts (regenerable charts/CSVs)
 analysis/output/
 
-# Raw data files
-data/
-data/*.xml
+# Raw data files (anchored to repo root — must NOT match services/data/)
+/data/
+/data/*.xml
 
 # IDE
 .DS_Store

@@ -26,8 +26,8 @@ _EXCERPT_CHARS = 240
 
 
 def _session():
-    """Open a session bound to the configured database."""
-    return get_session(settings.database_url)
+    """Open a session bound to the read-only database (MCP is read-only)."""
+    return get_session(settings.read_database_url)
 
 
 # ---------------------------------------------------------------------------
