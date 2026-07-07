@@ -18,6 +18,11 @@ class Meeting(Base):
     assembly = Column(Integer, nullable=False)
     meeting_date = Column(DateTime, nullable=False)
     meeting_type = Column(String(100))
+    # SeneddTV webcast player GUID, resolved from the clip id (== meeting_id) at
+    # ingest. The embeddable player is player.senedd.tv/Player/Index/{guid};
+    # nullable because resolution is best-effort (network) and old meetings may
+    # have no webcast. See senedd_data/webcast.py.
+    webcast_guid = Column(String(36))
 
     contributions = relationship("RawContribution", back_populates="meeting", cascade="all, delete-orphan")
     speeches = relationship("Speech", back_populates="meeting", cascade="all, delete-orphan")

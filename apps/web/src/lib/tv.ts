@@ -30,6 +30,18 @@ export function baseClipUrl(url: string | null): string | null {
   }
 }
 
+/**
+ * SeneddTV embeddable player URL for a meeting's webcast GUID. This is the bare
+ * player (player.senedd.tv/Player/Index/{guid}) that Senedd.tv itself iframes —
+ * no nav, no cookie banner — unlike the `/en/{clipId}` clip URL, which serves
+ * the full website. `startPos` (seconds) is layered on by `clipUrlAt`; the
+ * autostart/captions params are pre-set here.
+ */
+export function playerBaseUrl(webcastGuid: string | null): string | null {
+  if (!webcastGuid) return null;
+  return `https://player.senedd.tv/Player/Index/${webcastGuid}?autostart=True&captionsOn=False`;
+}
+
 /** Build a jump URL for a given offset. */
 export function clipUrlAt(base: string, startPos: number): string {
   try {

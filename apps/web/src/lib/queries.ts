@@ -1,5 +1,5 @@
 import { getPool } from "./db";
-import { baseClipUrl, parseStartPos } from "./tv";
+import { parseStartPos, playerBaseUrl } from "./tv";
 import type { MeetingSummary, Transcript, TranscriptSpeech } from "./types";
 
 /**
@@ -68,7 +68,7 @@ export async function getTranscript(meetingId: number): Promise<Transcript | nul
   const pool = getPool();
 
   const meetingRes = await pool.query(
-    `SELECT m.meeting_id, m.meeting_date, m.meeting_type,
+    `SELECT m.meeting_id, m.meeting_date, m.meeting_type, m.webcast_guid,
             COUNT(DISTINCT s.speech_id)::int AS speech_count
      FROM meetings m
      LEFT JOIN speeches s ON s.meeting_id = m.meeting_id
@@ -121,8 +121,6 @@ export async function getTranscript(meetingId: number): Promise<Transcript | nul
     tvUrl: r.spoken_url,
   }));
 
-  const firstUrl = speeches.find((s) => s.tvUrl)?.tvUrl ?? null;
-
   return {
     meeting: {
       meetingId: m.meeting_id,
@@ -131,7 +129,9 @@ export async function getTranscript(meetingId: number): Promise<Transcript | nul
       speechCount: m.speech_count,
       agendaItems: [...agendaTitles.values()],
     },
-    videoBaseUrl: baseClipUrl(firstUrl),
+    // The embeddable player, keyed by the meeting's webcast GUID (resolved at
+    // ingest). Null when unresolved → the pane hides and watch-links stand in.
+    videoBaseUrl: playerBaseUrl(m.webcast_guid ?? null),
     speeches,
   };
 }

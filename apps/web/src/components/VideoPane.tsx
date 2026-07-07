@@ -5,9 +5,10 @@ import type { TranscriptSpeech } from "@/lib/types";
 import { clipUrlAt, formatOffset } from "@/lib/tv";
 
 /**
- * Top-right quadrant: SeneddTV iframe. Jumping = reloading the iframe src
- * with the target speech's startPos (the only control surface the player
- * exposes — PRD §2). If the site denies framing, the notice below the player
+ * Top-right quadrant: the SeneddTV player iframe (player.senedd.tv, built from
+ * the meeting's webcast GUID — the bare player, not the full site). Jumping =
+ * reloading the iframe src with the target speech's startPos (the only control
+ * surface the player exposes — PRD §2). If framing is denied, the notice below
  * plus NEXT_PUBLIC_VIDEO_MODE=link are the fallback.
  */
 export default function VideoPane({
@@ -77,7 +78,7 @@ export default function VideoPane({
           key={src} // reload on jump
           src={src}
           onError={() => setLoadFailed(true)}
-          allow="autoplay; fullscreen"
+          allow="encrypted-media; autoplay; fullscreen"
           allowFullScreen
           className="aspect-video max-h-[38vh] w-full"
           title="Senedd.tv player"

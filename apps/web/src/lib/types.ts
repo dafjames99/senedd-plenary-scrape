@@ -27,7 +27,8 @@ export interface TranscriptSpeech {
 
 export interface Transcript {
   meeting: MeetingSummary;
-  /** Clip URL without startPos — the video pane's base src. */
+  /** SeneddTV player base URL (from the webcast GUID); startPos layered on per
+   *  jump. Null when the meeting has no resolved GUID → pane hides. */
   videoBaseUrl: string | null;
   speeches: TranscriptSpeech[];
 }

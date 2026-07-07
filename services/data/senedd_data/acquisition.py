@@ -34,6 +34,7 @@ from senedd_data.provisioning import Provisioner
 from senedd_data.session import get_engine, get_sessionmaker
 from senedd_data.settings import settings
 from senedd_data.transformers import clean_contribution_verbatim
+from senedd_data.webcast import resolve_webcast_guid
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,16 @@ class AcquisitionPipeline:
         """Parse a transcript XML and load raw_contributions, meetings, members."""
         logger.info("Phase 1: Ingesting XML from: %s", xml_file)
         meeting_data, members_list, contributions_list = parse_senedd_xml(xml_file)
+
+        # Resolve the SeneddTV webcast GUID (for the embeddable player) once per
+        # meeting. Preserve any previously-resolved value across re-ingest — a
+        # transient lookup failure must not wipe a good GUID, and merge would
+        # otherwise overwrite the column with the transient object's NULL.
+        meeting_id = meeting_data.get("meeting_id")
+        prior = session.get(Meeting, meeting_id) if meeting_id is not None else None
+        guid = (prior.webcast_guid if prior else None) or resolve_webcast_guid(meeting_id)
+        if guid:
+            meeting_data = {**meeting_data, "webcast_guid": guid}
 
         meeting = Meeting(**meeting_data)
         session.merge(meeting)
