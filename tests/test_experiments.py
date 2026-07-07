@@ -11,14 +11,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.experiments.config import (
+from senedd_embeddings.experiments.config import (
     CHUNK_STRATEGIES,
     ExperimentConfig,
     load_config,
 )
-from src.experiments.embedder import EmbedStats, format_chunks, purge_namespace
-from src.experiments.evaluation import EvalResult, QueryTiming
-from src.experiments.results import (
+from senedd_embeddings.experiments.embedder import EmbedStats, format_chunks, purge_namespace
+from senedd_embeddings.experiments.evaluation import EvalResult, QueryTiming
+from senedd_embeddings.experiments.results import (
     append_record,
     build_record,
     latest_per_run_id,
@@ -144,7 +144,10 @@ def test_load_config_rejects_unknown_fields(tmp_path: Path):
 
 
 def test_seed_configs_load_and_resolve():
-    configs_dir = Path(__file__).resolve().parent.parent / "experiments" / "configs"
+    configs_dir = (
+        Path(__file__).resolve().parent.parent
+        / "services" / "embeddings" / "experiments" / "configs"
+    )
     paths = sorted(configs_dir.glob("*.yaml"))
     assert paths, "seed configs missing"
     for p in paths:
@@ -282,7 +285,7 @@ class _FakeRow:
 
 
 def test_embed_corpus_skips_short_and_advances_cursor():
-    from src.experiments.embedder import embed_corpus
+    from senedd_embeddings.experiments.embedder import embed_corpus
 
     resolved = _config(doc_prefix="", min_item_words=5).resolve()
     long_body = "one two three four five six seven eight nine ten"
@@ -317,7 +320,7 @@ def test_embed_corpus_skips_short_and_advances_cursor():
 
 
 def test_embed_corpus_respects_max_items():
-    from src.experiments.embedder import embed_corpus
+    from senedd_embeddings.experiments.embedder import embed_corpus
 
     resolved = _config(doc_prefix="", min_item_words=0).resolve()
     body = "alpha beta gamma delta epsilon zeta eta theta"
@@ -339,7 +342,7 @@ def test_embed_corpus_respects_max_items():
 # ---------------------------------------------------------------------------
 
 def test_retrieve_applies_query_prefix_and_namespace():
-    from src.experiments.evaluation import retrieve
+    from senedd_embeddings.experiments.evaluation import retrieve
 
     resolved = _config().resolve()  # gemma: has a query prefix
     session = MagicMock()
@@ -360,7 +363,7 @@ def test_retrieve_applies_query_prefix_and_namespace():
 
 
 def test_retrieve_speaker_filter_bound():
-    from src.experiments.evaluation import retrieve
+    from senedd_embeddings.experiments.evaluation import retrieve
 
     resolved = _config(doc_prefix="", query_prefix="").resolve()
     session = MagicMock()

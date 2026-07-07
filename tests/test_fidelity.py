@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.db.fidelity import (
+from senedd_data.fidelity import (
     DEFAULT_THRESHOLDS,
     classify,
     count_words,

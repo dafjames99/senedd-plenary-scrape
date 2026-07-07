@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.db.fetcher import DataFetcher, Meeting
+from senedd_data.fetcher import DataFetcher, Meeting
 
 
 @pytest.fixture

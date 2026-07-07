@@ -13,8 +13,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src import setup_logging
-from src.search.service import SearchResult, semantic_search
+from senedd_data import setup_logging
+from senedd_search.service import SearchResult, semantic_search
 
 logger = logging.getLogger(__name__)
 

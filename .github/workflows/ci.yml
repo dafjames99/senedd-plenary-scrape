@@ -63,12 +63,12 @@ jobs:
         run: |
           uv run python -c "
           import os
-          from src.db.provisioning import Provisioner
+          from senedd_data.provisioning import Provisioner
           Provisioner(os.environ['DATABASE_URL']).create_schema()
           "
 
       # Every migration must round-trip: downgrade to base and rebuild to head.
       - name: Downgrade to base and re-upgrade
         run: |
-          uv run alembic downgrade base
-          uv run alembic upgrade head
+          uv run alembic -c services/data/alembic.ini downgrade base
+          uv run alembic -c services/data/alembic.ini upgrade head

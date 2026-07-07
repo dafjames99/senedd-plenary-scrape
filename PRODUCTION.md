@@ -39,7 +39,7 @@ Why Neon over the alternatives:
   a paid plan can lengthen the suspend timeout or disable suspension —
   a config change, not a migration.
 - **Branching is genuinely useful here**: a copy-on-write DB branch gives the
-  embedding-experiment framework (`experiments/README.md`) a full production
+  embedding-experiment framework (`services/embeddings/experiments/README.md`) a full production
   corpus to run against without touching production vectors, then gets
   deleted.
 - **Free tier is a real staging environment**: 0.5 GB storage / 100 CU-hours
@@ -71,7 +71,7 @@ gemma/Ollama path stays the local-dev default (free, offline) — coexistence by
 `model_name` is already how the store works.
 
 **Do not commit the re-embed until the experiment framework has validated the
-recipe.** Run `experiments/configs/openai-small.yaml` (and chunk-size variants)
+recipe.** Run `services/embeddings/experiments/configs/openai-small.yaml` (and chunk-size variants)
 against a full corpus first — the winning config's chunk parameters get
 promoted into `MODEL_METADATA_REGISTRY` before the production re-embed. The
 one-time cost of being wrong is cents, but the eval baseline reset is not free:
@@ -115,7 +115,7 @@ Operational requirements for the service (from PLAN.md follow-ups):
    The MCP's `DATABASE_URL` uses this role; the ingest role stays exclusive
    to GitHub Actions. A compromised/buggy MCP can then never mutate data.
 2. **Connection pooling** (Phase 2 follow-up): the service layer builds an
-   engine per URL via `src/db/session.get_engine` (lru_cached) — verify pool
+   engine per URL via `services/data/senedd_data/session.get_engine` (lru_cached) — verify pool
    sizing under concurrent HTTP clients and put Neon's pooled connection
    string (PgBouncer) in `DATABASE_URL` rather than the direct one.
 3. **Auth**: the data is public record (OGL v3.0), so the server can launch
@@ -180,23 +180,23 @@ cents on the re-embed.
 
 1. **Provision Neon** (free tier). Create the project, get direct + pooled
    connection strings. Run
-   `python -c "from src.db.provisioning import Provisioner; Provisioner('<url>').create_schema()"`
+   `python -c "from senedd_data.provisioning import Provisioner; Provisioner('<url>').create_schema()"`
    — same path CI's migration job exercises. Create `mcp_reader` (§1d.1).
 2. **Indexing migration** (§2) — land it before bulk data so the backfill
    writes both columns.
 3. **Validate the embedding recipe** — experiment runs per
-   `experiments/README.md` against a Neon branch (or local copy) of a
+   `services/embeddings/experiments/README.md` against a Neon branch (or local copy) of a
    backfilled corpus; promote the winner into the registry.
 4. **Backfill + bulk re-embed** — `scripts/backfill.py` for the historic
    range, then the embed sweep with `EMBEDDING_PROVIDER=openai`. Build the
-   HNSW index. Run `python -m src.db.fidelity`. Re-record
+   HNSW index. Run `python -m senedd_data.fidelity`. Re-record
    `tests/eval/BASELINE.md` via `eval.yml` and commit.
 5. **Arm the sync** — set repo secrets (`DATABASE_URL` = ingest role, pooled;
    `OPENAI_API_KEY`) and repo variables (`EMBEDDING_PROVIDER=openai`,
    `EMBEDDING_MODEL=text-embedding-3-small`, `SYNC_ENABLED=true`). Watch the
    first scheduled run; `eval.yml` after it as a spot check.
 6. **Deploy the MCP** — Render web service off this repo,
-   `uv run python -m src.mcp_server --transport http`, env:
+   `uv run python -m senedd_mcp --transport http`, env:
    `DATABASE_URL` (= `mcp_reader`, pooled), `OPENAI_API_KEY`,
    `EMBEDDING_PROVIDER/MODEL`. Platform rate limiting on. Smoke-test from
    Claude (custom connector → `https://<service>.onrender.com/mcp`) with the

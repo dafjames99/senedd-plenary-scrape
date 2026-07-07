@@ -27,7 +27,7 @@ Two levels (see ``--level``):
 * ``speech`` (default) — the cleaned, served-unit view. Aggregating to the speech
   removes the contribution-level interjection artifact (a brief interjection's
   near-identical timestamp no longer collapses a duration). Mirrors the persisted
-  ``speech_fidelity`` classification from :mod:`src.db.fidelity`, so the charts and
+  ``speech_fidelity`` classification from :mod:`senedd_data.fidelity`, so the charts and
   suspect CSV match what the MCP surfaces via ``is_suspect``.
 * ``contribution`` — the original lens. Computes two filters side by side: ``raw``
   (``contribution_type = 'C'`` with non-empty verbatim, no downstream dependency)
@@ -42,7 +42,7 @@ Outputs (written to ``--output-dir``, default ``analysis/output/``):
   ``wpm_by_meeting.png``, ``wpm_outliers.csv``.
 
 To *persist* the speech-level flags (for the MCP), run the pass in
-:mod:`src.db.fidelity`; this script is the read-only visual/CSV companion.
+:mod:`senedd_data.fidelity`; this script is the read-only visual/CSV companion.
 
 Usage
 -----
@@ -66,15 +66,15 @@ if str(ROOT_DIR) not in sys.path:
 
 from sqlalchemy import create_engine
 
-from src import setup_logging
-from src.db.fidelity import (
+from senedd_data import setup_logging
+from senedd_data.fidelity import (
     DEFAULT_THRESHOLDS,
     SPEECH_FIDELITY_SQL,
     classify,
     count_words,
     ends_midsentence,
 )
-from src.db.settings import settings
+from senedd_data.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -168,7 +168,7 @@ def load_frame(meeting: Optional[int]) -> pd.DataFrame:
 def load_speech_frame(meeting: Optional[int]) -> pd.DataFrame:
     """Load the speech-level fidelity view — the cleaned, served-unit signal.
 
-    Reuses the canonical query and classifier from ``src.db.fidelity`` so the
+    Reuses the canonical query and classifier from ``senedd_data.fidelity`` so the
     chart matches the persisted ``speech_fidelity`` flags exactly. Aggregating to
     the speech removes the contribution-level interjection artifact (a brief
     interjection's near-identical timestamp no longer collapses a duration).

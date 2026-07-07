@@ -4,9 +4,9 @@
 The stages are independently runnable for production (each concern is its own
 module + entry point):
 
-    python -m src.db.acquisition       # raw ingest only
-    python -m src.db.transformation    # derived rebuild only
-    python -m src.embeddings.embed     # embedding sweep only (manual)
+    python -m senedd_data.acquisition       # raw ingest only
+    python -m senedd_data.transformation    # derived rebuild only
+    python -m senedd_embeddings.embed     # embedding sweep only (manual)
 
 This script wires them together for convenient local runs. It holds no pipeline
 logic — only argument parsing and stage sequencing.
@@ -18,10 +18,10 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from src import setup_logging, settings
-from src.db.acquisition import AcquisitionPipeline
-from src.db.transformation import TransformationPipeline
-from src.embeddings.embed import run_embedding_sweep
+from senedd_data import setup_logging, settings
+from senedd_data.acquisition import AcquisitionPipeline
+from senedd_data.transformation import TransformationPipeline
+from senedd_embeddings.embed import run_embedding_sweep
 
 logger = logging.getLogger("orchestrator")
 

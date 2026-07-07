@@ -15,7 +15,7 @@ import pytest
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 
 from scripts.query_speeches import display_results
-from src.search.service import SearchResult, semantic_search
+from senedd_search.service import SearchResult, semantic_search
 
 
 # ---------------------------------------------------------------------------
@@ -87,9 +87,9 @@ def test_query_prefix_applied():
         rows=[], query_prefix="task: search | query: "
     )
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("NHS reform", source="spoken", provider_string="test", model_string="test/model")
 
@@ -102,9 +102,9 @@ def test_no_query_prefix_when_empty():
         rows=[], query_prefix=""
     )
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("climate policy", source="spoken", provider_string="test", model_string="test/model")
 
@@ -115,9 +115,9 @@ def test_model_name_passed_to_sql():
     """model_name must appear in the SQL parameters so results are scoped to one model."""
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=[])
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("budget", source="spoken", provider_string="test", model_string="test/model")
 
@@ -129,9 +129,9 @@ def test_speaker_filter_in_params():
     """speaker_filter must be passed as a wildcard-wrapped bound parameter."""
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=[])
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("housing", speaker_filter="Jones",
                         source="spoken", provider_string="test", model_string="test/model")
@@ -144,9 +144,9 @@ def test_no_speaker_filter_param_when_omitted():
     """speaker_filter key must not appear in params when the argument is None."""
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=[])
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("housing", source="spoken", provider_string="test", model_string="test/model")
 
@@ -158,9 +158,9 @@ def test_structured_filters_bound_when_provided():
     """date_from/date_to/agenda_item must be passed as bound params when given."""
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=[])
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("housing", date_from="2026-03-01", date_to="2026-03-31",
                         agenda_item="260301-2",
@@ -177,9 +177,9 @@ def test_structured_filters_absent_when_omitted():
     """No date/agenda keys should appear in params when the arguments are None."""
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=[])
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         semantic_search("housing", source="spoken", provider_string="test", model_string="test/model")
 
@@ -201,9 +201,9 @@ def test_min_similarity_excludes_low_confidence():
     ]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("test query", min_similarity=50.0,
                                   source="spoken", provider_string="test", model_string="test/model")
@@ -217,9 +217,9 @@ def test_top_k_limits_results():
     rows = [_Row(speech_id=i, cosine_distance=0.1 * i) for i in range(1, 11)]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("test query", top_k=3,
                                   source="spoken", provider_string="test", model_string="test/model")
@@ -231,9 +231,9 @@ def test_no_results_returns_empty_list():
     """Empty DB response must return an empty list without raising."""
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=[])
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("anything", source="spoken", provider_string="test", model_string="test/model")
 
@@ -259,9 +259,9 @@ def test_result_fields_populated():
     )]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("mental health", source="spoken", provider_string="test", model_string="test/model")
 
@@ -283,9 +283,9 @@ def test_similarity_score_computed_correctly():
     rows = [_Row(cosine_distance=0.234)]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("test", source="spoken", provider_string="test", model_string="test/model")
 
@@ -355,9 +355,9 @@ def test_speech_source_sets_discriminator_and_back_compat_ids():
     rows = [_Row(speech_id=7, speech_text="Body.", spoken_url=None)]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("x", source="spoken",
                                   provider_string="test", model_string="test/model")
@@ -373,9 +373,9 @@ def test_written_source_maps_non_speech_fields():
     rows = [_Row(speech_id=3, speaker_name="First Minister", speech_text="Answer text.")]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("x", source="written",
                                   provider_string="test", model_string="test/model")
@@ -392,9 +392,9 @@ def test_votes_excluded_when_speaker_filter_supplied():
     rows = [_Row(speech_id=1, cosine_distance=0.1)]
     mock_provider, mock_register, mock_registry, mock_get_session = _make_search_setup(rows=rows)
     with (
-        patch("src.search.service.PROVIDER_REGISTER", mock_register),
-        patch("src.search.service.MODEL_METADATA_REGISTRY", mock_registry),
-        patch("src.search.service.get_session", mock_get_session),
+        patch("senedd_search.service.PROVIDER_REGISTER", mock_register),
+        patch("senedd_search.service.MODEL_METADATA_REGISTRY", mock_registry),
+        patch("senedd_search.service.get_session", mock_get_session),
     ):
         results = semantic_search("x", source="vote", speaker_filter="Jones",
                                   provider_string="test", model_string="test/model")
@@ -405,7 +405,7 @@ def test_votes_excluded_when_speaker_filter_supplied():
 
 def test_spoken_alias_resolves_to_speech_source():
     """'spoken' and 'speech' are accepted aliases for the speech source."""
-    from src.search.service import _resolve_sources
+    from senedd_search.service import _resolve_sources
     assert _resolve_sources("spoken") == ["speech"]
     assert _resolve_sources("speech") == ["speech"]
     assert _resolve_sources("written") == ["written"]

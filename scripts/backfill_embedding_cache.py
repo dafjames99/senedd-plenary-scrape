@@ -20,8 +20,8 @@ if str(ROOT_DIR) not in sys.path:
 
 from sqlalchemy import create_engine, text
 
-from src import setup_logging, settings
-from src.embeddings.pipeline import EmbeddingPipeline
+from senedd_data import setup_logging, settings
+from senedd_embeddings.pipeline import EmbeddingPipeline
 
 logger = logging.getLogger(__name__)
 

@@ -12,8 +12,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.embeddings import cache as embed_cache
-from src.embeddings.pipeline import EmbeddingPipeline
+from senedd_embeddings import cache as embed_cache
+from senedd_embeddings.pipeline import EmbeddingPipeline
 
 MODEL = "ollama/embeddinggemma:300m"  # a real key in MODEL_METADATA_REGISTRY
 

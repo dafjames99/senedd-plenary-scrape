@@ -11,8 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.db.parser import parse_qnr_xml
-from src.db.transformers import clean_contribution_verbatim
+from senedd_data.parser import parse_qnr_xml
+from senedd_data.transformers import clean_contribution_verbatim
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "qnr_sample.xml"
 

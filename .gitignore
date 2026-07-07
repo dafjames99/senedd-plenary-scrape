@@ -40,3 +40,9 @@ Thumbs.db
 
 todo.md
 prompt*.md
+# Node / Next.js (apps/web)
+node_modules/
+apps/web/.next/
+apps/web/out/
+apps/web/.vercel/
+*.tsbuildinfo
