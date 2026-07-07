@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { MeetingSummary, Transcript } from "@/lib/types";
+import { useResizable } from "@/hooks/useResizable";
 import SearchPane from "./SearchPane";
 import VideoPane from "./VideoPane";
 import TranscriptPane from "./TranscriptPane";
+import ResizeHandle from "./ResizeHandle";
 
 export type VideoMode = "embed" | "link" | "off";
 
@@ -33,6 +35,23 @@ export default function Workspace({
   const anchor = useRef<{ startPos: number; wallStart: number } | null>(null);
 
   const showVideo = videoMode === "embed" && transcript.videoBaseUrl !== null;
+
+  // Draggable quadrant boundaries (persisted per-user). Max sizes track the
+  // viewport so a pane can't crowd out its flex-1 partner.
+  const leftPane = useResizable({
+    storageKey: "senedd:leftWidth",
+    axis: "x",
+    initial: 460,
+    min: 320,
+    max: () => Math.min(760, window.innerWidth * 0.6),
+  });
+  const videoPane = useResizable({
+    storageKey: "senedd:videoHeight",
+    axis: "y",
+    initial: 360,
+    min: 200,
+    max: () => window.innerHeight * 0.75,
+  });
 
   const jumpTo = useCallback(
     (speechId: number) => {
@@ -75,7 +94,10 @@ export default function Workspace({
   return (
     <div className="flex h-full">
       {/* LEFT: search / ask */}
-      <div className="flex w-[38%] min-w-[340px] flex-col border-r border-gray-200 bg-white">
+      <div
+        className="flex min-w-0 shrink-0 flex-col bg-white"
+        style={{ width: leftPane.size }}
+      >
         <SearchPane
           initialMeetings={initialMeetings}
           currentMeetingId={transcript.meeting.meetingId}
@@ -83,16 +105,32 @@ export default function Workspace({
         />
       </div>
 
+      <ResizeHandle
+        axis="x"
+        dragging={leftPane.dragging}
+        onPointerDown={leftPane.onPointerDown}
+        label="Resize search panel"
+      />
+
       {/* RIGHT: video (optional) + transcript */}
       <div className="flex min-w-0 flex-1 flex-col">
         {showVideo && (
-          <VideoPane
-            baseUrl={transcript.videoBaseUrl!}
-            activeSpeech={activeSpeech}
-            meetingDate={transcript.meeting.meetingDate}
-            following={following}
-            onToggleFollow={() => setFollowing((f) => !f)}
-          />
+          <>
+            <VideoPane
+              baseUrl={transcript.videoBaseUrl!}
+              activeSpeech={activeSpeech}
+              meetingDate={transcript.meeting.meetingDate}
+              following={following}
+              onToggleFollow={() => setFollowing((f) => !f)}
+              heightPx={videoPane.size}
+            />
+            <ResizeHandle
+              axis="y"
+              dragging={videoPane.dragging}
+              onPointerDown={videoPane.onPointerDown}
+              label="Resize video player"
+            />
+          </>
         )}
         <TranscriptPane
           transcript={transcript}
