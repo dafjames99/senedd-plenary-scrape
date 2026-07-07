@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  /* Senedd-adjacent palette: Welsh red accent on a cool neutral base. */
+  --color-accent: #c8102e;
+  --color-accent-dark: #9c0c24;
+  --color-ink: #1a202c;
+  --color-paper: #f7f7f5;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}

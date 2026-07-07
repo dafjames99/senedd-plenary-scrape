@@ -69,6 +69,7 @@ uv run python -m senedd_mcp --transport streamable-http   # HTTP (web app / remo
 # Frontend (apps/web — Next.js + Tailwind; see apps/web/PRD.md)
 pnpm install
 pnpm --filter @senedd/web dev
+python scripts/seed_fixture.py   # synthetic dev meeting when Senedd hosts are unreachable
 ```
 
 ## Configuration

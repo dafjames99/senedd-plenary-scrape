@@ -58,7 +58,7 @@ jobs:
         run: uv sync --dev
 
       # Full provisioning path: alembic upgrade head + register SQL procedures —
-      # the same code path production setup uses (src/db/provisioning.py).
+      # the same code path production setup uses (services/data/senedd_data/provisioning.py).
       - name: Provision schema from migrations
         run: |
           uv run python -c "
@@ -72,3 +72,26 @@ jobs:
         run: |
           uv run alembic -c services/data/alembic.ini downgrade base
           uv run alembic -c services/data/alembic.ini upgrade head
+
+  web:
+    name: Web app typecheck + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm --filter @senedd/web lint
+
+      # Pages are dynamic (no build-time DB); this is the same build Vercel runs.
+      - name: Build
+        run: pnpm --filter @senedd/web build

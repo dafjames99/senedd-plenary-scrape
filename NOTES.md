@@ -34,3 +34,29 @@ monorepo migration and frontend build, per the session brief.
 - Historical docs (PLAN.md, PRODUCTION.md) had their *command/path*
   references updated to the new layout; their narrative was left intact.
 - pnpm pinned via `packageManager` to the container's pnpm (10.12.1).
+
+## Phase 3 build notes (frontend)
+
+- **Verified end-to-end in this sandbox** against the fixture meeting: meeting
+  search API, transcript API (startPos + clip base URL correct), mock ask flow
+  (markers ↔ citation cards 1:1), click-speech → iframe jumps to `startPos`,
+  citation click → jump, and the virtual-clock follow advanced the highlight
+  across speech boundaries. Headless-Chromium screenshots in the session log.
+- **`/api/ask` live mode** uses a manual Anthropic tool-use loop (not the SDK
+  tool runner) because we harvest `[speech:ID]` citations and need the tool
+  results + final text separately. Model `claude-opus-4-8` by default
+  (`ANTHROPIC_MODEL` to override; PLAN.md's Haiku-class guardrail applies to
+  the future public demo, not this authenticated dev surface).
+- **Mock mode is a first-class path**: without `ANTHROPIC_API_KEY` +
+  `SENEDD_MCP_URL` the route answers from keyword retrieval over real DB rows
+  through the same block grammar, clearly labelled — so the citation UI is
+  developable/demoable without keys (as in this sandbox).
+- The app builds with the DB unreachable (all data pages are
+  `force-dynamic`) — confirmed here, so Vercel builds need no DB access.
+- **Vercel deployment**: set the project Root Directory to `apps/web` (Vercel
+  auto-detects the pnpm workspace), env vars `DATABASE_URL` (Neon pooled
+  string) and optionally `ANTHROPIC_API_KEY`/`SENEDD_MCP_URL`/`ANTHROPIC_MODEL`
+  + `NEXT_PUBLIC_VIDEO_MODE`. No vercel.json needed.
+- senedd.tv could not be reached from this sandbox, so iframe embeddability
+  remains unverified (PRD §2 risk) — the pane shows the proxy's block page
+  here; `NEXT_PUBLIC_VIDEO_MODE=link` is the one-variable fallback.
