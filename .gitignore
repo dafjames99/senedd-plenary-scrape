@@ -48,3 +48,6 @@ out/
 next-env.d.ts
 *.tsbuildinfo
 .vercel
+
+# CodeBoarding VS Code extension
+.codeboarding/
