@@ -5,8 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install dependencies (requires Python 3.14+)
-uv sync
+# Install dependencies (uv workspace: Python 3.13+; single lock + venv for all services)
+uv sync --dev
+
+# Monorepo layout: services/{data,embeddings,mcp} (uv workspace members),
+# apps/web (Next.js, pnpm workspace). See ARCHITECTURE.md. Makefile has the
+# canonical task commands (make test / mcp / mcp-http / web / dev / provision).
 
 # Optional extras
 uv sync --extra openai             # OpenAI embedding provider
@@ -26,11 +30,11 @@ python main.py --embed-loop         # loop embedding until all speeches are embe
 python main.py -i                   # interactive prompt between embedding batches
 
 # Run the pipeline stages independently (each concern is its own module + entry point)
-python -m src.db.acquisition        # RAW only: fetch + XML → source-of-truth tables (no derived)
-python -m src.db.transformation     # DERIVED only: rebuild from raw (auto-discovers meetings needing it)
-python -m src.db.transformation --all           # purge_downstream + full rebuild from raw
-python -m src.db.transformation --meetings 123,456  # transform specific meeting IDs
-python -m src.embeddings.embed --loop           # embedding sweep only (run manually)
+python -m senedd_data.acquisition        # RAW only: fetch + XML → source-of-truth tables (no derived)
+python -m senedd_data.transformation     # DERIVED only: rebuild from raw (auto-discovers meetings needing it)
+python -m senedd_data.transformation --all           # purge_downstream + full rebuild from raw
+python -m senedd_data.transformation --meetings 123,456  # transform specific meeting IDs
+python -m senedd_embeddings.embed --loop           # embedding sweep only (run manually)
 
 # Semantic search
 python scripts/query_speeches.py "NHS waiting times"
@@ -42,18 +46,30 @@ python scripts/backfill.py --start 2024-01-01 --action harvest  # scrape to CSV 
 python scripts/backfill.py --start 2024-01-01 --action ingest   # load from existing CSV
 
 # Transcript-fidelity QA (run after ingest/reprocess; not part of the pipeline)
-python -m src.db.fidelity                 # compute + persist per-speech flags
-python -m src.db.fidelity --dry-run       # report only, no write
+python -m senedd_data.fidelity                 # compute + persist per-speech flags
+python -m senedd_data.fidelity --dry-run       # report only, no write
 python analysis/wpm_fidelity.py           # read-only charts + suspect CSV (speech level)
 
-# Embedding experiments (see experiments/README.md for the full procedure)
-python -m src.experiments.runner --config experiments/configs/baseline-gemma.yaml
-python -m src.experiments.runner --config ... --limit 100   # wiring smoke test (flagged partial)
-python -m src.experiments.runner --list                     # experiment namespaces in the DB
-python -m src.experiments.runner --purge exp:name-hash8     # drop one experiment's vectors
+# Embedding experiments (see services/embeddings/experiments/README.md for the full procedure)
+python -m senedd_embeddings.experiments.runner --config services/embeddings/experiments/configs/baseline-gemma.yaml
+python -m senedd_embeddings.experiments.runner --config ... --limit 100   # wiring smoke test (flagged partial)
+python -m senedd_embeddings.experiments.runner --list                     # experiment namespaces in the DB
+python -m senedd_embeddings.experiments.runner --purge exp:name-hash8     # drop one experiment's vectors
 
 # Retrieval eval scoreboard (live stack; recorded baseline in tests/eval/BASELINE.md)
 python -m tests.eval.runner
+
+# Migrations (Alembic lives with the data service)
+uv run alembic -c services/data/alembic.ini upgrade head
+
+# MCP server
+uv run python -m senedd_mcp                               # stdio
+uv run python -m senedd_mcp --transport streamable-http   # HTTP (web app / remote)
+
+# Frontend (apps/web — Next.js + Tailwind; see apps/web/PRD.md)
+pnpm install
+pnpm --filter @senedd/web dev
+python scripts/seed_fixture.py   # synthetic dev meeting when Senedd hosts are unreachable
 ```
 
 ## Configuration
@@ -62,7 +78,10 @@ Copy `.env` and set:
 
 | Variable | Default | Notes |
 |---|---|---|
-| `DATABASE_URL` | `sqlite:///./sqlite_database.db` | Use PostgreSQL URL in practice |
+| `DATABASE_URL` | `sqlite:///./sqlite_database.db` | Owner/write URL (pipeline + Alembic). Use PostgreSQL URL in practice |
+| `DATABASE_URL_RO` | — | SELECT-only URL for read-only consumers (MCP via `settings.read_database_url`; falls back to `DATABASE_URL`). Web app uses `apps/web/.env` |
+| `READONLY_DB_ROLE` | `senedd_ro` | Read-only login role `make provision` creates/grants (Postgres only) |
+| `READONLY_DB_PASSWORD` | — | Password set on `READONLY_DB_ROLE` during provisioning |
 | `EMBEDDING_PROVIDER` | `sentence-transformer` | `sentence-transformer`, `ollama`, `openai` |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Must match a key in `MODEL_METADATA_REGISTRY` |
 | `OLLAMA_URL` | `http://localhost:11434` | Required if using `ollama` provider |
@@ -79,11 +98,11 @@ Copy `.env` and set:
 The former monolithic `SeneddPipeline` has been split along the raw→derived seam
 (the same seam codified by `purge_downstream_tables`). Each stage is independently
 runnable, so raw ingest and derived rebuild can be scheduled/reasoned about apart.
-Schema provisioning (`src/db/provisioning.py`, Alembic + procedures) and the shared
-session factory (`src/db/session.py`, `get_session`) back all stages. A thin
-deprecated `SeneddPipeline` facade remains in `src/db/pipeline.py` for compat.
+Schema provisioning (`services/data/senedd_data/provisioning.py`, Alembic + procedures) and the shared
+session factory (`services/data/senedd_data/session.py`, `get_session`) back all stages. A thin
+deprecated `SeneddPipeline` facade remains in `services/data/senedd_data/pipeline.py` for compat.
 
-**1. `AcquisitionPipeline`** (`src/db/acquisition.py`) — **RAW only, network + XML.**
+**1. `AcquisitionPipeline`** (`services/data/senedd_data/acquisition.py`) — **RAW only, network + XML.**
 Writes source-of-truth tables only: `raw_contributions`, `meetings`, `members`,
 `votes`, `vote_records`, `written_contributions`, plus operational
 `sync_checkpoints` / `artifact_watch`. Never builds a derived table.
@@ -92,7 +111,7 @@ Writes source-of-truth tables only: `raw_contributions`, `meetings`, `members`,
   Votes/QNR watches, checkpoint. Returns the ingested meeting IDs.
 - `acquire_meetings(...)` — explicit-list backfill (transcript + Votes/QNR in one pass).
 
-**2. `TransformationPipeline`** (`src/db/transformation.py`) — **DERIVED only, no network.**
+**2. `TransformationPipeline`** (`services/data/senedd_data/transformation.py`) — **DERIVED only, no network.**
 Reads raw, rebuilds derived tables per meeting (all atomic per `meeting_id`):
 1. **Clean & classify** → `clean_contributions`, `classified_contributions`, `oral_questions`
 2. **Reconstruct speeches** → `speeches`, `speech_parts` — boundary = speaker change OR agenda item change; prefers English translation over verbatim Welsh
@@ -106,7 +125,7 @@ Reads raw, rebuilds derived tables per meeting (all atomic per `meeting_id`):
 
 Cascade FK constraints (`ondelete="CASCADE"`) make reprocessing safe — re-running a meeting purges its existing speeches automatically.
 
-**3. `EmbeddingPipeline`** (`src/embeddings/pipeline.py`) — chunks speeches, embeds them, stores vectors.
+**3. `EmbeddingPipeline`** (`services/embeddings/senedd_embeddings/pipeline.py`) — chunks speeches, embeds them, stores vectors.
 
 - Skips speeches under 10 words
 - Prepends `"<speaker_name>: "` to each chunk before embedding
@@ -114,21 +133,21 @@ Cascade FK constraints (`ondelete="CASCADE"`) make reprocessing safe — re-runn
 
 ### Embedding providers
 
-Pluggable via `PROVIDER_REGISTER` in `src/embeddings/providers.py`. Each provider must be registered in `MODEL_METADATA_REGISTRY` (`src/embeddings/config.py`) as `"<provider>/<model>"` — the settings validator rejects unknown combinations at startup.
+Pluggable via `PROVIDER_REGISTER` in `services/embeddings/senedd_embeddings/providers.py`. Each provider must be registered in `MODEL_METADATA_REGISTRY` (`services/embeddings/senedd_embeddings/config.py`) as `"<provider>/<model>"` — the settings validator rejects unknown combinations at startup.
 
 Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m`, `openai/text-embedding-3-small`.
 
 ### Embedding cache
 
-`src/embeddings/cache.py` is a content-addressed cache (`embedding_cache` table) keyed on `sha256(formatted_chunk)` + `model_name`, where `formatted_chunk` is the exact string sent to the provider (`doc_prefix + speaker_prefix + chunk`). The pipeline embeds only cache misses and writes computed vectors back in the same transaction. It has **no FK to `speeches`**, so it survives the delete-and-rebuild of speeches on re-ingest — a backfill re-run (or a reverted chunking experiment) reuses every vector instead of recomputing it. `embed_config_version` is provenance only; correctness rides on the hash. A dev aid (disable via `EMBED_CACHE_ENABLED=false` in prod); wipe with `CALL purge_embedding_cache(...)`.
+`services/embeddings/senedd_embeddings/cache.py` is a content-addressed cache (`embedding_cache` table) keyed on `sha256(formatted_chunk)` + `model_name`, where `formatted_chunk` is the exact string sent to the provider (`doc_prefix + speaker_prefix + chunk`). The pipeline embeds only cache misses and writes computed vectors back in the same transaction. It has **no FK to `speeches`**, so it survives the delete-and-rebuild of speeches on re-ingest — a backfill re-run (or a reverted chunking experiment) reuses every vector instead of recomputing it. `embed_config_version` is provenance only; correctness rides on the hash. A dev aid (disable via `EMBED_CACHE_ENABLED=false` in prod); wipe with `CALL purge_embedding_cache(...)`.
 
 ### Embedding experiments
 
-`src/experiments/` is a config-driven harness for comparing chunking/model recipes (`experiments/configs/*.yaml`). Each run embeds the speech corpus under an isolated namespace — `model_name = "exp:<name>-<confighash8>"` in `speech_embeddings`, invisible to production search — then scores it against the labelled cases in `tests/eval/cases.yaml` using the production ranking CTE with the config's own `query_prefix` (doc/query symmetry per experiment). Quality (MRR, hit@k, recall@k), performance (embed throughput, query latency p50/p95) and storage are appended to `experiments/runs.jsonl` and ranked in the auto-generated `experiments/RESULTS.md`; both are committed. The embedding cache is keyed on the provider's *real* model name, so experiments share vectors with production and each other. Procedure, comparability rules, and the promotion path are in `experiments/README.md`.
+`services/embeddings/senedd_embeddings/experiments/` is a config-driven harness for comparing chunking/model recipes (`services/embeddings/experiments/configs/*.yaml`). Each run embeds the speech corpus under an isolated namespace — `model_name = "exp:<name>-<confighash8>"` in `speech_embeddings`, invisible to production search — then scores it against the labelled cases in `tests/eval/cases.yaml` using the production ranking CTE with the config's own `query_prefix` (doc/query symmetry per experiment). Quality (MRR, hit@k, recall@k), performance (embed throughput, query latency p50/p95) and storage are appended to `services/embeddings/experiments/runs.jsonl` and ranked in the auto-generated `services/embeddings/experiments/RESULTS.md`; both are committed. The embedding cache is keyed on the provider's *real* model name, so experiments share vectors with production and each other. Procedure, comparability rules, and the promotion path are in `services/embeddings/experiments/README.md`.
 
 ### Incremental sync
 
-`DataFetcher` (`src/db/fetcher.py`) scrapes `https://record.senedd.wales/XMLExport`, parses meeting rows filtered by transcript type (default `BilingualTranscript`), and downloads XML for meetings newer than the last `SyncCheckpoint`. The backfill script (`scripts/backfill.py`) walks a date range day-by-day (with rate limiting) and can cache discovered meetings to CSV as a resumability checkpoint.
+`DataFetcher` (`services/data/senedd_data/fetcher.py`) scrapes `https://record.senedd.wales/XMLExport`, parses meeting rows filtered by transcript type (default `BilingualTranscript`), and downloads XML for meetings newer than the last `SyncCheckpoint`. The backfill script (`scripts/backfill.py`) walks a date range day-by-day (with rate limiting) and can cache discovered meetings to CSV as a resumability checkpoint.
 
 ### Semantic search
 
@@ -136,8 +155,8 @@ Supported: `sentence-transformers/all-MiniLM-L6-v2`, `ollama/embeddinggemma:300m
 
 ### Transcript fidelity (QA)
 
-`src/db/fidelity.py` is a derived, on-demand QA pass (not a pipeline phase) that scores each speech for transcript fidelity into the `speech_fidelity` table. Duration is the gap to the next speech's start within the meeting; `wpm` is the served `speech_text` word count over that duration. It is computed at **speech** level deliberately — contribution level is dominated by an interjection artifact (a brief interjection's near-identical timestamp collapses the inferred duration). Two complementary signals: WPM (`flag`: `too_slow`/`too_fast`/`broken_timestamp`/`low_confidence`/`no_duration`/`ok`) and `ends_midsentence` — though em-dash *interruptions* are treated as terminal (the corpus marks them cleanly), so that signal mostly confirms well-formed boundaries rather than finding truncations. `is_suspect` is the coarse consumer flag, surfaced by the MCP's `senedd_get_speech` (joined in `src/search/lookups.py`) so an answer can be caveated. The table has a cascade FK to `speeches`, so a reprocess purges it — **re-run `python -m src.db.fidelity` after ingest/reprocess**. `analysis/wpm_fidelity.py` is the read-only visual companion (charts + suspect CSV; `--level contribution` shows the artifact). It is a *measurement*, not a remediation: missing source text cannot be recovered.
+`services/data/senedd_data/fidelity.py` is a derived, on-demand QA pass (not a pipeline phase) that scores each speech for transcript fidelity into the `speech_fidelity` table. Duration is the gap to the next speech's start within the meeting; `wpm` is the served `speech_text` word count over that duration. It is computed at **speech** level deliberately — contribution level is dominated by an interjection artifact (a brief interjection's near-identical timestamp collapses the inferred duration). Two complementary signals: WPM (`flag`: `too_slow`/`too_fast`/`broken_timestamp`/`low_confidence`/`no_duration`/`ok`) and `ends_midsentence` — though em-dash *interruptions* are treated as terminal (the corpus marks them cleanly), so that signal mostly confirms well-formed boundaries rather than finding truncations. `is_suspect` is the coarse consumer flag, surfaced by the MCP's `senedd_get_speech` (joined in `services/mcp/senedd_search/lookups.py`) so an answer can be caveated. The table has a cascade FK to `speeches`, so a reprocess purges it — **re-run `python -m senedd_data.fidelity` after ingest/reprocess**. `analysis/wpm_fidelity.py` is the read-only visual companion (charts + suspect CSV; `--level contribution` shows the artifact). It is a *measurement*, not a remediation: missing source text cannot be recovered.
 
 ### SQL procedures
 
-Stored in `src/db/procedures/` and registered at schema creation time. `001_purge_downstream.sql` is called by `reprocess` mode to safely truncate downstream tables before rebuilding. `003_purge_embedding_cache.sql` wipes the embedding cache, with optional `model_name` / `version` / `older_than` filters (NULL = all).
+Stored in `services/data/senedd_data/procedures/` and registered at schema creation time. `001_purge_downstream.sql` is called by `reprocess` mode to safely truncate downstream tables before rebuilding. `003_purge_embedding_cache.sql` wipes the embedding cache, with optional `model_name` / `version` / `older_than` filters (NULL = all).

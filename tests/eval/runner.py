@@ -6,7 +6,7 @@ needs the full local stack running. It is a manual tool, not a pytest test:
     uv run python -m tests.eval.runner
     uv run python -m tests.eval.runner --k 20 --json eval_baseline.json
 
-The retrieval entry point is ``src.search.service.semantic_search`` (the shared
+The retrieval entry point is ``senedd_search.service.semantic_search`` (the shared
 service layer). The recorded baseline in ``BASELINE.md`` must be unchanged by
 refactors that are meant to be behaviour-neutral.
 """
@@ -23,7 +23,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src.search.service import semantic_search  # noqa: E402
+from senedd_search.service import semantic_search  # noqa: E402
 
 from tests.eval.loader import EvalCase, load_cases  # noqa: E402
 from tests.eval.metrics import DEFAULT_KS, CaseScore, aggregate, score_case  # noqa: E402

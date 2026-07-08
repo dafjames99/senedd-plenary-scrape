@@ -19,10 +19,10 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from src import setup_logging, settings
-from src.db.acquisition import AcquisitionPipeline
-from src.db.fetcher import DataFetcher, Meeting
-from src.db.transformation import TransformationPipeline
+from senedd_data import setup_logging, settings
+from senedd_data.acquisition import AcquisitionPipeline
+from senedd_data.fetcher import DataFetcher, Meeting
+from senedd_data.transformation import TransformationPipeline
 
 logger = logging.getLogger(__name__)
 

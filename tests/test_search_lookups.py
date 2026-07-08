@@ -13,8 +13,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.search._dates import coerce_datetime
-from src.search.lookups import (
+from senedd_search._dates import coerce_datetime
+from senedd_search.lookups import (
     _qa_role,
     _vote_result,
     get_agenda_thread,
@@ -94,7 +94,7 @@ def _patch_session_returning(rows):
     session.__enter__ = lambda s: s
     session.__exit__ = MagicMock(return_value=False)
     session.execute.return_value.fetchall.return_value = rows
-    return patch("src.search.lookups._session", return_value=session)
+    return patch("senedd_search.lookups._session", return_value=session)
 
 
 def test_written_pairing_groups_question_and_answer():

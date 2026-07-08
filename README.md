@@ -1,173 +1,62 @@
-# Senedd Speech Reconstruction Pipeline
+# Senedd Plenary Platform
 
-Transform raw Senedd Cymru (Welsh Parliament) XML plenary session records into semantically reconstructed speeches with full traceability, text cleaning, and bilingual support.
+Turns Senedd Cymru (Welsh Parliament) plenary records into a queryable,
+semantically searchable database — with an MCP server for LLM-driven research
+and a web frontend for humans.
 
-## Overview
+A monorepo of four composite services (see [ARCHITECTURE.md](ARCHITECTURE.md)):
 
-This project parses XML contributions from Senedd plenary sessions, cleans the text (HTML entities, tag removal), classifies rows (speech/procedural/noise), reconstructs multi-part speeches, and stores everything in a normalized SQLite database with complete lineage tracking.
+| Service | Where | What it does |
+|---|---|---|
+| **Database / ETL** | `services/data` | Scrapes plenary XML (transcripts, votes, QNR), reconstructs speeches with full lineage, owns the Postgres schema (Alembic + pgvector) |
+| **Embeddings** | `services/embeddings` | Chunks + embeds speeches/votes/written Q&A (pluggable providers), content-addressed cache, experiment harness |
+| **MCP server** | `services/mcp` | Read-only retrieval service (semantic search + structured lookups) exposed as MCP tools/resources/prompts |
+| **Web app** | `apps/web` | Next.js frontend: meeting search, video + synced transcript, LLM query with citation blocks |
 
----
-
-## Quick Start
-
-### Installation
-
-```bash
-# Clone repository
-git clone https://github.com/yourusername/senedd-scrape
-cd senedd-scrape
-
-# Install dependencies (requires Python 3.14+)
-uv sync
-```
-
-### Run the Pipeline
+## Quick start
 
 ```bash
-# Full rebuild (fresh database)
-python3 main.py --mode full
+# Python side (uv workspace: one lock, one venv, all services editable)
+uv sync --dev
+cp .env.template .env          # set DATABASE_URL (Postgres + pgvector)
 
-# Or incremental mode (append/update existing data)
-python3 main.py --mode incremental
+# Provision the schema (Alembic head + SQL procedures)
+DATABASE_URL=postgresql://... make provision
+
+# Ingest data
+uv run python main.py                          # incremental sync (network)
+uv run python scripts/backfill.py --start 2024-01-01 --end 2024-01-31 --action all
+
+# Run things
+make test        # offline suite (no DB/GPU needed)
+make mcp         # MCP server on stdio
+make dev         # MCP over HTTP + Next.js dev server together
+
+# Web app only
+pnpm install && pnpm --filter @senedd/web dev
 ```
 
-This creates `senedd_records.db` with all tables populated.
+Per-service docs: [MCP server](services/mcp/senedd_mcp/README.md) ·
+[experiments](services/embeddings/experiments/README.md) ·
+[migrations](services/data/alembic/README) · [frontend PRD](apps/web/PRD.md)
 
----
+Project history and roadmap: [PLAN.md](PLAN.md) ·
+[PRODUCTION.md](PRODUCTION.md) · [MONOREPO_PLAN.md](MONOREPO_PLAN.md)
 
-## Database Schema
+## Data model in one paragraph
 
-### Core Dimension Tables
-- **meetings** — Plenary session metadata
-- **members** — Unique speakers
-- **raw_contributions** — Direct XML ingestion
+`raw_contributions` is the verbatim XML source of truth (with per-contribution
+timestamps and SeneddTV URLs). Transformation rebuilds derived tables per
+meeting, atomically and idempotently: cleaned/classified rows →
+**reconstructed speeches** (`speeches` + `speech_parts` lineage) → members,
+procedural events. Votes and written Q&A (QNR) attach to the same meetings.
+`speech_embeddings` stores polymorphic vectors (`source_type` ∈ speech |
+written | vote) per model; semantic search ranks the best chunk per item with
+cosine distance and returns citation metadata. `speech_fidelity` is a QA
+signal over transcript quality — re-run `make fidelity` after any
+ingest/reprocess.
 
-### Processing Pipeline Tables
-- **clean_contributions** — Text-normalized rows
-- **classified_contributions** — Row type classification
+## License & attribution
 
-### Output Tables (Primary Deliverables)
-- **speeches** — Reconstructed semantic units
-- **speech_parts** — Lineage mapping to XML
-- **procedural_events** — Non-speech events
-- **speech_embeddings** — Vector storage (empty, ready for future use)
-
-### Additional Tables
-- **sync_checkpoints** — Incremental pipeline audit trail
-
-#### Relationships
-```
-Meeting (1) → (M) RawContribution
-           → (M) Speech
-
-Member (1) → (M) RawContribution
-          → (M) Speech
-
-Speech (1) → (M) SpeechPart → (1) RawContribution
-```
-
----
-
-## Usage Guide
-
-### Connect to Database
-
-**From CLI:**
-```bash
-sqlite3 senedd_records.db
-```
-### Export Data
-
-**To CSV:**
-```bash
-sqlite3 -header -csv senedd_records.db \
-  "SELECT speech_id, speaker_name, agenda_item_id, LENGTH(speech_text) as text_length 
-   FROM speeches;" > speeches.csv
-```
-
-**To JSON:**
-```bash
-sqlite3 -json senedd_records.db \
-  "SELECT speech_id, speaker_name, speech_text FROM speeches LIMIT 10;" > speeches.json
-```
-
----
-
-## Pipeline Architecture
-
-### Six Processing Phases
-```mermaid
-flowchart TD
-    A[1. Ingest XML] --> B[2. Clean Text]
-    B --> C[3. Classify Rows]
-    
-    C --> D[3a. Speech Rows]
-    C --> E[3b. Procedural Rows]
-    C --> F[3c. Noise Rows]
-    
-    D --> G[4. Reconstruct Speeches]
-    
-    G --> H[5. Build Dimensions<br/>Members & Metadata]
-    E --> H
-    
-    H --> I[6. Validate<br/>Traceability & Integrity]
-```
-
-### Continual Updates & Idempotency
-
-The pipeline is designed around a unified, idempotent processing model:
-- **Stateless Parsing**: XML extraction is decoupled from the database model in `src/parser.py`, outputting pure Python types.
-- **Atomic Transactions**: Meetings are processed as uniform atomic chunks. All transformation stages for a single `meeting_id` run inside a single database transaction (`with session.begin()`). If any stage fails, the entire meeting is rolled back.
-- **Auto-Cleanup (Idempotence)**: Reprocessing an existing meeting is fully safe and does not duplicate data. Cascading foreign keys (`ondelete="CASCADE"`) and ORM relationship cascades (`cascade="all, delete-orphan"`) automatically purge previous Speeches, SpeechParts, and ProceduralEvents when new ones are written.
-
-### Pipeline Modes
-
-**Full Mode** (Fresh database)
-```bash
-python3 main.py --mode full
-python3 main.py --mode full --xml-file data/other_meeting.xml
-```
-
-**Incremental Mode** (Append/update)
-```bash
-python3 main.py --mode incremental
-python3 main.py --mode incremental --last-sync 2026-05-01
-python3 main.py --mode incremental --keep-xml  # Retain XML files
-```
-
----
-
-## Future Enhancements
-
-### Ready to Implement
-
-1. **Embeddings Layer**
-   - Embed 126 speeches with sentence-transformers or OpenAI
-   - Store vectors in `speech_embeddings` table (schema ready)
-   - Enable semantic search and similarity queries
-
-2. **Speaker Analytics Dashboard**
-   - Contribution frequency charts
-   - Speech length analysis by speaker
-   - Topic tagging and discourse analysis
-
-3. **Video Alignment**
-   - Link speeches to seneddTv timestamps
-   - Find exact locations in parliament recording
-   - Multi-language alignment
-
-4. **Streaming Pipeline**
-   - Chunked XML parsing instead of `pd.read_xml()`
-   - Batch database writes for memory efficiency
-   - Support for very large files
-
-5. **Member History Tracking**
-   - Track job title changes over time
-   - Add `member_history` table for temporal queries
-   - Enable historical analysis
-
----
-
-## License & Attribution
-
-Built for analysis of Welsh Parliament proceedings. Senedd data used under open access terms.
+Senedd data is public record used under the
+[Open Government Licence v3.0](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).

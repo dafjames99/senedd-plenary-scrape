@@ -6,9 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.mcp_server.formatting import envelope, search_hit, thread_item, to_json
-from src.search.lookups import SpeechDetail
-from src.search.service import SearchResult
+from senedd_mcp.formatting import envelope, search_hit, thread_item, to_json
+from senedd_search.lookups import SpeechDetail
+from senedd_search.service import SearchResult
 
 
 def _search_result(**kw):

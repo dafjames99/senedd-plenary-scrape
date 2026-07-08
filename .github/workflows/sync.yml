@@ -65,4 +65,4 @@ jobs:
       # speech_fidelity has a cascade FK to speeches, so any reprocess/re-ingest
       # purges it — recompute after every sync (idempotent).
       - name: Transcript-fidelity QA pass
-        run: uv run python -m src.db.fidelity
+        run: uv run python -m senedd_data.fidelity

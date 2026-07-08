@@ -10,12 +10,12 @@ Captured from the design discussion on 2026-06-17.
 
 ## North-star architecture
 
-Four concerns, kept deliberately separate (today they're tangled in `src/db/pipeline.py`):
+Four concerns, kept deliberately separate (today they're tangled in `services/data/senedd_data/pipeline.py`):
 
 1. **Schema structure (DDL)** → owned by **Alembic** (versioned, data-preserving migrations).
 2. **Data lifecycle (DML)** → owned by the pipeline (ingest, clean, classify, reconstruct,
    embed, reprocess, the `purge_*` SQL procedures). Operates *within* a fixed schema.
-3. **Retrieval service** → a shared `src/search/` layer used by both the CLI and the MCP.
+3. **Retrieval service** → a shared `services/mcp/senedd_search/` layer used by both the CLI and the MCP.
 4. **MCP surface** → thin, typed tools/prompts/resources over the service layer.
 
 Two principles that shape every decision below:
@@ -63,13 +63,13 @@ without migrations. Both come first.
 
 ## Phase 1 — Retrieval service layer  *(DONE — unblocks MCP)*
 
-- [x] Extract `semantic_search` + `SearchResult` → `src/search/service.py`.
+- [x] Extract `semantic_search` + `SearchResult` → `services/mcp/senedd_search/service.py`.
 - [x] Push filters into the CTE `WHERE` (pre-filter before ranking): `speaker`,
       `date_from`, `date_to`, `agenda_item`, and a commented `source_type` hook for Phase 3.
 - [x] Typed dataclasses with **citation metadata**: `speech_id`, `meeting_date`,
       `speaker_name`, `agenda_item_id`, `agenda_item_english`, SeneddTV URL.
       *(Official record URL deferred — no reliable column; needs a URL scheme, not fabricated.)*
-- [x] Structured lookups in `src/search/lookups.py` (the MCP will wrap these):
+- [x] Structured lookups in `services/mcp/senedd_search/lookups.py` (the MCP will wrap these):
   - [x] `get_speech(speech_id)` — full text + context.
   - [x] `filter_speeches(...)` — non-semantic structured listing (chronological).
   - [x] `find_member(name)` / `get_member(member_id)` — resolution + role history.
@@ -82,10 +82,10 @@ without migrations. Both come first.
 
 ---
 
-## Phase 2 — MCP MVP (speeches only)  *(DONE — `src/mcp_server/`)*
+## Phase 2 — MCP MVP (speeches only)  *(DONE — `services/mcp/senedd_mcp/`)*
 
 - [x] Invoked the `mcp-builder` skill.
-- [x] `src/mcp_server/` with FastMCP (`senedd_mcp`); stdio + streamable-HTTP via `--transport`.
+- [x] `services/mcp/senedd_mcp/` with FastMCP (`senedd_mcp`); stdio + streamable-HTTP via `--transport`.
 - [x] 8 tools wrapping Phase 1: `senedd_search_speeches`, `senedd_get_speech`,
       `senedd_get_agenda_thread`, `senedd_filter_speeches`, `senedd_find_member`,
       `senedd_get_member`, `senedd_list_meetings`, `senedd_get_meeting`. All read-only.
@@ -95,7 +95,7 @@ without migrations. Both come first.
       `senedd://members`.
 - [x] Prompts: `senedd_search_strategy`, `senedd_position_over_time`.
 - [x] Verified end-to-end via FastMCP dispatch (tools/resources/prompts, error + validation paths);
-      run/registration docs in `src/mcp_server/README.md`.
+      run/registration docs in `services/mcp/senedd_mcp/README.md`.
 - [ ] **Read-only Postgres role** — deferred to deployment (Phase 5); local dev uses the dev role.
 - [ ] Manual Loop-B smoke test in a real client (Claude Desktop) — for you to run.
 - Follow-up: centralise DB connection pooling before the HTTP transport serves multiple clients.
@@ -187,7 +187,7 @@ without migrations. Both come first.
 > **Actioned plan: see `PRODUCTION.md`** (2026-07) — researched host choices
 > (Neon + GitHub Actions cron + Render), the fixed-dim/HNSW indexing
 > migration, rollout sequence, and costs. The embedding-recipe decision is
-> gated on the experiment framework (`experiments/README.md`). Workflows for
+> gated on the experiment framework (`services/embeddings/experiments/README.md`). Workflows for
 > CI / scheduled sync / eval live in `.github/workflows/`.
 
 - [ ] Neon (cloud Postgres). Set `EMBEDDING_MODEL=openai/text-embedding-3-small`.

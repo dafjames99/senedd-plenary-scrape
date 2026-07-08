@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.db.parser import parse_votes_xml
+from senedd_data.parser import parse_votes_xml
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "votes_sample.xml"
 

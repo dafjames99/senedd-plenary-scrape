@@ -1,0 +1,10 @@
+{
+  "name": "senedd-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @senedd/web dev",
+    "build": "pnpm --filter @senedd/web build",
+    "lint": "pnpm --filter @senedd/web lint"
+  },
+  "packageManager": "pnpm@10.12.1"
+}
