@@ -43,18 +43,31 @@ cases:
 
   - id: parent-advocacy-child-protection
     query: A statutory entitlement to parent advocacy for parents at risk of child protection proceedings
-    relevant_speech_ids: [128]
-    note: Cefin Campbell on parent advocacy for parents at risk of entering child protection.
+    relevant_speech_ids: [125, 128]
+    note: >
+      Cefin Campbell (128) on the committee's call for a statutory entitlement to
+      parent advocacy; Dawn Bowden's preceding response (125) on the importance
+      of parental advocacy is the same exchange and equally answers the query.
 
   - id: gp-surgery-closures
     query: The impact of GP surgery closures and mergers on patients in rural and urban Wales
-    relevant_speech_ids: [1022]
-    note: Vaughan Gething on dislocation from GP practice closures.
+    relevant_speech_ids: [1019, 1020, 1022]
+    note: >
+      Vaughan Gething (1022) on dislocation from GP practice closures, in the
+      same petitions-committee exchange as Carolyn Thomas's framing (1019) and
+      Lindsay Whittle's point on the closure petition (1020) — all three
+      substantively address the query, not just the final speaker.
 
   - id: child-poverty-strategy
     query: The Welsh Government's strategy to tackle and mitigate child poverty
-    relevant_speech_ids: [3801]
-    note: Jane Hutt on the child poverty strategy and devolved powers.
+    relevant_speech_ids: [3801, 3803]
+    note: >
+      Jane Hutt on the child poverty strategy and devolved powers (3801), same
+      answer continued in 3803. Two other speeches surfaced by weaker rankings
+      for this query (Sioned Williams's 2026-03-24 statement, Cefin Campbell's
+      2026-03-18 question) are from different sessions entirely and were
+      deliberately left unlabeled — they're adjacent commentary, not the
+      strategy itself.
 
   - id: internal-market-act-review
     query: The UK Government's review of the UK Internal Market Act and the case for repeal
