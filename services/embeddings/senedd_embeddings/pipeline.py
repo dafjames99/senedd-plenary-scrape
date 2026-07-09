@@ -60,6 +60,7 @@ _SOURCE_CONFIGS: Dict[str, _SourceConfig] = {
             WHERE se.embedding_id IS NULL
               AND s.speech_text IS NOT NULL
               AND s.speech_text <> ''
+              AND array_length(regexp_split_to_array(trim(s.speech_text), '\\s+'), 1) >= :min_words
             LIMIT :limit
         """,
         min_words=10,
@@ -78,6 +79,7 @@ _SOURCE_CONFIGS: Dict[str, _SourceConfig] = {
             WHERE se.embedding_id IS NULL
               AND COALESCE(w.text_english, w.text_welsh) IS NOT NULL
               AND COALESCE(w.text_english, w.text_welsh) <> ''
+              AND array_length(regexp_split_to_array(trim(COALESCE(w.text_english, w.text_welsh)), '\\s+'), 1) >= :min_words
             LIMIT :limit
         """,
         min_words=10,
@@ -136,7 +138,11 @@ class EmbeddingPipeline:
         config = _SOURCE_CONFIGS[source_type]
         rows = session.execute(
             text(config.select_sql),
-            {"model_name": self.provider.model_name, "limit": limit},
+            {
+                "model_name": self.provider.model_name,
+                "limit": limit,
+                "min_words": config.min_words,
+            },
         ).fetchall()
         return [
             EmbeddableItem(
