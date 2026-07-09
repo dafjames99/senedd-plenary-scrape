@@ -50,18 +50,18 @@ export default function AskPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <form onSubmit={submit} className="border-b border-gray-100 p-3">
+      <form onSubmit={submit} className="border-b border-plum/10 p-3">
         <div className="flex gap-2">
           <input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             placeholder="Ask about the plenary record…"
-            className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-accent focus:ring-1 focus:ring-accent"
+            className="min-w-0 flex-1 rounded-md border border-plum/20 bg-white px-3 py-2 text-sm outline-none focus:border-plum focus:ring-1 focus:ring-plum"
           />
           <button
             type="submit"
             disabled={loading || !question.trim()}
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent-dark disabled:opacity-40"
+            className="rounded-md bg-plum px-4 py-2 text-sm font-medium text-white transition hover:bg-plum-deep disabled:opacity-40"
           >
             {loading ? "…" : "Ask"}
           </button>
@@ -70,7 +70,7 @@ export default function AskPanel({
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
         {!result && !loading && (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-ink/50">
             Ask a question of the record — e.g.{" "}
             <em>&ldquo;What has been said about rural bus services?&rdquo;</em>. Answers cite
             the speeches they rest on; click a citation to jump the video and transcript to
@@ -78,7 +78,7 @@ export default function AskPanel({
           </p>
         )}
         {loading && (
-          <p className="animate-pulse text-sm text-gray-500">Searching the record…</p>
+          <p className="animate-pulse text-sm text-ink/50">Searching the record…</p>
         )}
 
         {result?.blocks.map((block, i) => {
@@ -136,7 +136,7 @@ function renderProseWithMarkers(
           onMouseEnter={() => handlers.onHover(marker)}
           onMouseLeave={() => handlers.onHover(null)}
           onClick={() => handlers.onClick(marker)}
-          className="mx-0.5 rounded bg-red-50 px-1 font-semibold text-accent transition hover:bg-red-100"
+          className="mx-0.5 rounded bg-plum/10 px-1 font-semibold text-plum transition hover:bg-plum/20"
           title={`Jump to citation ${marker}`}
         >
           {marker}

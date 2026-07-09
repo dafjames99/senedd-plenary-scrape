@@ -5,12 +5,19 @@ export interface MeetingSummary {
   meetingDate: string; // ISO
   meetingType: string;
   speechCount: number;
-  agendaItems: string[];
+  /** Recorded divisions during the meeting (0 = none). Drives the vote tag. */
+  voteCount: number;
 }
 
-export interface AgendaItem {
+/** One agenda item in the LHS table of contents (built by lib/agenda.ts). */
+export interface AgendaTocEntry {
   agendaItemId: string;
+  /** Official number parsed from the title ("1. Questions…"); null if unnumbered. */
+  number: string | null;
+  /** Title with any leading number stripped — the ToC renders them separately. */
   title: string;
+  /** First speech of the item; ToC clicks jump the video/transcript here. */
+  firstSpeechId: number;
 }
 
 export interface TranscriptSpeech {

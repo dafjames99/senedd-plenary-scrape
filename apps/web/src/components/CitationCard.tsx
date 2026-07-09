@@ -7,7 +7,7 @@ import { formatOffset } from "@/lib/tv";
 type Citation = Extract<AskBlock, { type: "citation" }>;
 
 /**
- * The citation block (PRD §5): accent left border distinguishes evidence from
+ * The citation block (PRD §5): plum-accented card distinguishes evidence from
  * LLM prose; carries speaker, date, agenda context, the quoted excerpt, and a
  * play affordance that jumps the video/transcript.
  */
@@ -31,7 +31,7 @@ export default function CitationCard({
   const body = (
     <>
       <div className="flex items-baseline gap-2">
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent text-[11px] font-bold text-white">
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-plum text-[11px] font-bold text-white">
           {citation.marker}
         </span>
         <span className="truncate text-sm font-semibold">{citation.speaker}</span>
@@ -40,11 +40,11 @@ export default function CitationCard({
       {citation.agendaTitle && (
         <p className="mt-1 truncate text-xs text-gray-500">{citation.agendaTitle}</p>
       )}
-      <blockquote className="mt-2 border-l-2 border-gray-200 pl-2 text-xs leading-relaxed text-gray-700">
+      <blockquote className="mt-2 border-l-2 border-heather/40 pl-2 font-serif text-xs italic leading-relaxed text-ink/80">
         “{citation.quote}”
       </blockquote>
       <div className="mt-2 flex items-center gap-3 text-xs">
-        <span className="inline-flex items-center gap-1 font-medium text-accent">
+        <span className="inline-flex items-center gap-1 font-medium text-plum">
           ▶ {sameMeeting ? "Jump to moment" : "Open meeting"}
           {citation.startPos !== null && (
             <span className="text-gray-400">({formatOffset(citation.startPos)})</span>
@@ -66,7 +66,7 @@ export default function CitationCard({
   );
 
   const className = `block w-full rounded-lg border bg-white p-3 text-left shadow-sm transition ${
-    highlighted ? "border-accent ring-2 ring-accent/30" : "border-gray-200 hover:border-accent/60"
+    highlighted ? "border-plum ring-2 ring-plum/30" : "border-plum/15 hover:border-plum/50"
   }`;
 
   // Same meeting → jump in place; other meeting → navigate with a deep link.

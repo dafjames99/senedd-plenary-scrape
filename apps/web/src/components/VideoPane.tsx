@@ -42,12 +42,12 @@ export default function VideoPane({
   });
 
   return (
-    <div className="flex min-h-0 flex-col bg-black/95" style={{ height: heightPx }}>
-      <div className="flex items-center justify-between px-4 py-2 text-xs text-gray-300">
+    <div className="flex min-h-0 flex-col bg-plum-deep" style={{ height: heightPx }}>
+      <div className="flex items-center justify-between px-4 py-2 text-xs text-parchment/80">
         <span className="truncate">
           Plenary, {date}
           {activeSpeech && (
-            <span className="text-gray-500">
+            <span className="text-parchment/45">
               {" "}
               — {activeSpeech.speakerName} at {formatOffset(activeSpeech.startPos)}
             </span>
@@ -56,7 +56,7 @@ export default function VideoPane({
         <button
           onClick={onToggleFollow}
           className={`ml-3 shrink-0 rounded-full px-2.5 py-1 font-medium transition ${
-            following ? "bg-accent text-white" : "bg-gray-700 text-gray-300"
+            following ? "bg-heather text-plum-deep" : "bg-white/10 text-parchment/70"
           }`}
           title="Advance the transcript highlight with playback (approximate — the player cannot report its position)"
         >
@@ -65,13 +65,13 @@ export default function VideoPane({
       </div>
 
       {loadFailed ? (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-gray-300">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-sm text-parchment/80">
           <p>The Senedd.tv player couldn&apos;t be embedded here.</p>
           <a
             href={src}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md bg-accent px-3 py-1.5 font-medium text-white"
+            className="rounded-md bg-heather px-3 py-1.5 font-medium text-plum-deep"
           >
             Watch on Senedd.tv ↗
           </a>

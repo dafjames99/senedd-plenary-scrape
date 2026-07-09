@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MeetingSummary, Transcript } from "@/lib/types";
+import { agendaToc } from "@/lib/agenda";
 import { useResizable } from "@/hooks/useResizable";
 import SearchPane from "./SearchPane";
 import VideoPane from "./VideoPane";
@@ -91,6 +92,13 @@ export default function Workspace({
   const activeSpeech =
     transcript.speeches.find((s) => s.speechId === activeSpeechId) ?? null;
 
+  // ToC for the LHS: unique agenda items + which one the video/transcript is
+  // currently on (the followed highlight when the virtual clock is running).
+  const toc = useMemo(() => agendaToc(transcript.speeches), [transcript.speeches]);
+  const currentSpeechId = (showVideo ? followedSpeechId : null) ?? activeSpeechId;
+  const activeAgendaId =
+    transcript.speeches.find((s) => s.speechId === currentSpeechId)?.agendaItemId ?? null;
+
   return (
     <div className="flex h-full">
       {/* LEFT: search / ask */}
@@ -101,6 +109,8 @@ export default function Workspace({
         <SearchPane
           initialMeetings={initialMeetings}
           currentMeetingId={transcript.meeting.meetingId}
+          agendaToc={toc}
+          activeAgendaId={activeAgendaId}
           onCite={jumpTo}
         />
       </div>
